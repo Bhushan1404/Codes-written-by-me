@@ -1,0 +1,162 @@
+840  pcs status
+  841  ps -ef | grep cosim
+  842  cd /home/serviceacc/
+  843  sh Oracle_Inventory.sh
+  844  lsblk
+  845  df -kh
+  846  ps -ef | grep cosim
+  847  pcs status
+  848  ls -ld /COS*
+  849  cd COSP
+  850  cd /COSP
+  851  ll
+  852  mkdir cosimp
+  853  chwon cosimp:cosimpgrp
+  854  chwon cosimp:cosimpgrp cosimp/
+  855  ll
+  856  chmod go-rx cosimp/
+  857  ll
+  858  chown cosimp:cosimpgrp cosimp/
+  859  ll
+  860  ls -ld /COS*
+  861  chmod o-r /COST
+  862  ls -ld /COS*
+  863  chmod o+r /COST
+  864  chmod o-w /COST
+  865  chmod o+r /COST
+  866  ls -ld /COS*
+  867  ll
+  868  df -HP
+  869  sudo su - cosimt
+  870  sudo su - cosimp
+  871  pcs status
+  872  systemctl status cos1t
+  873  systemctl status cosimt
+  874  vi /usr/lib/systemd/system/cosimt.service
+  875  ll /COST/cosimt/bin/startcos
+  876  vi /usr/lib/systemd/system/cosimt.service
+  877  vi /usr/lib/systemd/system/cosimp.service
+  878  systemctl status cosimt
+  879  systemctl enable cosimt
+  880  systemctl status cosimt
+  881  systemctl enable cosimp
+  882  systemctl status cosimp
+  883  pcs status
+  884  vgs
+  885  vi /etc/sudoers
+  886  nslookup wm003166
+  887  nslookup 10.101.144.216
+  888  nslookup WM003237
+  889  ping WM003237
+  890  nslookup WM003257
+  891  nslookup wm003137
+  892  nslookup 10.101.144.159
+  893  ping 10.101.144.159
+  894  nslookup 10.101.146.82
+  895  nslookup WM20rw5hbd2y01
+  896  pcs resource create COS1T-application systemd:cosimt.service --group HA-COS1T
+  897  pcs status
+  898  systemctl status cosimt.service
+  899  systemctl start cosimt.service
+  900  journalctl -xe
+  901  systemctl status cosimt.service
+  902  pcs status
+  903  pcs resource create COS1P-application systemd:cosimp.service --group HA-COS1P
+  904  pcs status
+  905  pcs resource show COS1T-application
+  906  pcs resource config COS1T-application
+  907  systemctl enable cosimt.service
+  908  systemctl start cosimt.service
+  909  journalctl -xe
+  910  cat /etc/systemd/system/cosimt.service
+  911  cd /etc/systemd/system/
+  912  ll
+  913  pcs status
+  914  systemctl stop cosimt.service
+  915  systemctl start cosimt.service
+  916  pcs status
+  917  systemctl status cosimt.service
+  918  cd /usr/lib/systemd/system/cosimt.service
+  919  cat /usr/lib/systemd/system/cosimt.service
+  920  systemctl edit cosimt.service
+  921  systemctl status cosimt
+  922  systemctl status cosimp
+  923  pcs status
+  924  ipcs
+  925  netstat -an |grep 2048
+  926   nslookup 10.101.146.52
+  927   nslookup 10.101.146.51
+  928  netstat -an |grep 4713
+  929  netstat -an |grep 80
+  930  netstat -an |grep 443
+  931  netstat -an |grep 80
+  932  locate httpd.conf
+  933  less /COST/cosimt/cosihttpd/conf/httpd.conf
+  934   ps -ef |grep tns
+  935  nslookup WM003064
+  936  cat /etc/oratab
+  937  pcs status
+  938  crm_resource COS1P-ora-listener
+  939  crm_resource COS1P-ora-listener config
+  940  crm_resource config COS1P-ora-listener
+  941  pcs config
+  942  cp /usr/lib/systemd/system/cosimt.service /etc/systemd/system/
+  943  systemctl daemon-reload
+  944  systemctl enable cosimt.service
+  945  systemctl start cosimt.service
+  946  journalctl -xe
+  947  cd/etc/systemd/system/
+  948  cd /etc/systemd/system/
+  949  ll
+  950  rm cosimt.service
+  951  cd ../..
+  952  cd ..
+  953  systemctl enable cosimt.service
+  954  systemctl start cosimt.service
+  955  systemctl status cosimt.service
+  956  cat /usr/lib/systemd/system/cosimt.service;
+  957  pcs status
+  958  history
+  959  pcs status
+  960  systemctl status cosimt.service
+  961  ps -ef|grep -i listener
+  962  pcs resource refresh
+  963  pcs status
+  964  pcs config COS1T-ora-listener
+  965  pcs resource config COS1T-ora-listener
+  966  pcs status
+  967  cd /usr/lib/systemd/system
+  968  ls -lrt *cos*
+  969  pcs status
+  970  cat /usr/lib/systemd/system/cosimt.service
+  971  cat /usr/lib/systemd/system/cosimp.service
+  972  systemctl start cosimt.service
+  973  pcs status
+  974  systemctl status cosimt.service
+  975  pcs status
+  976  systemctl stop cosimt.service
+  977  pcs resource config COS1T-application
+  978  pcs resource disable COS1T-application
+  979  pcs status
+  980  pcs resource enable  COS1T-application
+  981  pcs status
+  982  pcs resource delete COS1T-application
+  983  pcs status
+  984  pcs resource create COS1T-application systemd:cosimt.service --group HA-COS1T
+  985  pcs status
+  986  systemctl status cosimt.service
+  987  pcs status
+  988  systemctl status cosimt.service
+  989  cd /usr/lib/systemd/system/
+  990  ls -lrt *cos*
+  991  cat /usr/lib/systemd/system/cosimp.service
+  992  cat /usr/lib/systemd/system/cosimt.service
+  993  pcs status
+  994  ps -ef|grep -i pmon
+  995  ps -ef|grep -i listener
+  996  clear
+  997  ps -ef|grep -i listener
+  998  ps -ef|grep -i pmon
+  999  pcs status
+ 1000  history
+
