@@ -1,0 +1,69 @@
+
+
+    projects:
+    -   allow_override: false
+        credential:
+            credential_type:
+                kind: scm
+                name: Source Control
+                type: credential_type
+            name: Bit Bucket Creds
+            organization: null
+            type: credential
+        custom_virtualenv: null
+        description: ''
+        local_path: _6__bitbucket_test
+        name: Bitbucket AWX Test
+        natural_key:
+            name: Bitbucket AWX Test
+            organization:
+                name: Default
+                type: organization
+            type: project
+        organization:
+            name: Default
+            type: organization
+        related:
+            notification_templates_error: []
+            notification_templates_started: []
+            notification_templates_success: []
+        scm_branch: main
+        scm_clean: false
+        scm_delete_on_update: false
+        scm_refspec: ''
+        scm_type: git
+        scm_update_cache_timeout: 0
+        scm_update_on_launch: false
+        scm_url: https://bhushan_3806@bitbucket.org/bhushan3806/repository.git.git
+        timeout: 0
+    -   allow_override: false
+
+        custom_virtualenv: null
+        description: ''
+        local_path: bhushan
+        name: Manua AWXl Project
+        natural_key:
+            name: Manua AWXl Project
+            organization:
+                name: Default
+                type: organization
+            type: project
+        organization:
+            name: Default
+            type: organization
+        related:
+            notification_templates_error: []
+            notification_templates_started: []
+            notification_templates_success: []
+        scm_branch: ''
+        scm_clean: false
+        scm_delete_on_update: false
+        scm_refspec: ''
+        scm_type: ''
+        scm_update_cache_timeout: 0
+        scm_update_on_launch: false
+        scm_url: ''
+        timeout: 0
+
+
+...

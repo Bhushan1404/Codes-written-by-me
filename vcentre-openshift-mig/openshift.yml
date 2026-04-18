@@ -1,0 +1,344 @@
+---
+ - name: Migrating Inventory Hosts from Vcentre to Openshift
+   hosts: localhost
+   gather_facts: true
+   collections:
+     - vmware.vmware_rest
+   vars_files:
+        - vault.yml
+   vars:
+     nodelist: "{{ serverlist }}"
+     ocp_token: "{{ ocp_token }}"
+     kubeconfig_path: "/tmp/kubeconfig-{{ ansible_date_time.epoch }}"
+     ocp_api: "{{ ocp_api }}"
+   tasks:
+     - name: Login to OpenShift with username/password
+       command: oc login {{ ocp_api }} -u {{ ocp_user }} -p {{ ocp_pass }} --insecure-skip-tls-verify=true --kubeconfig={{ kubeconfig_path }}
+       register: oc_login
+       changed_when: false
+
+     - name: Get list of existing OpenShift VMs
+       command: oc get virtualmachine -A -o json --kubeconfig={{ kubeconfig_path }}
+       register: ocp_vms
+       changed_when: false
+
+     - name: Extract VM names from OpenShift
+       set_fact:
+         ocp_vm_names: "{{ ocp_vms.stdout | from_json | json_query('items[*].metadata.name')  }}"
+
+     - name: Filter serverlist and remove those already present in OpenShift
+       set_fact:
+         filtered_serverlist: >-
+           {{
+             serverlist.split(',') | map('trim') | map('lower') |
+             reject('in', ocp_vm_names) | list
+           }}
+
+     - name: Fail if all VMs in serverlist are already present in OpenShift
+       fail:
+        msg: "Servers from serverlist are all present in OpenShift"
+       when: filtered_serverlist | length == 0
+
+     - name: Set filtered nodelist for migration
+       set_fact:
+         nodelist: "{{ filtered_serverlist }}"
+
+     - name: Build a list of all the folders
+       vmware.vmware_rest.vcenter_folder_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+       register: all_folders
+
+     - name: Filter VM folders
+       ansible.builtin.set_fact:
+         vm_folders: "{{ all_folders.value | selectattr('type', 'equalto', 'VIRTUAL_MACHINE') | list }}"
+
+     - name: Check each VM folder for VMs
+       vmware.vmware_rest.vcenter_vm_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+         folders: "{{ item.folder }}"
+       register: vm_folders_with_vms
+       loop: "{{ vm_folders }}"
+       when: vm_folders | length > 0
+
+     - name: Display VM names and IDs
+       ansible.builtin.debug:
+         msg: "VM Name: {{ item.name }}, VM ID: {{ item.vm }}"
+       loop: "{{ vm_folders_with_vms.results | map(attribute='value') | flatten }}"
+       when: item | length > 0
+       loop_control:
+         label: "{{ item.name }}"
+
+     - name: Collect VM names and IDs
+       ansible.builtin.set_fact:
+         vm_name_id_pairs: "{{ vm_name_id_pairs | default([]) + [{'name': item.name,'vm': item.vm}] }}"
+       loop: "{{ vm_folders_with_vms.results | map(attribute='value') | flatten }}"
+       when: item | length > 0
+
+     - name: Prepare VMs for Plan spec
+       ansible.builtin.set_fact:
+         vms_for_plan_spec: >-
+           {{
+             vms_for_plan_spec | default([]) + [{
+               'hooks': [],
+               'id': vm_id.vm,
+               'networks': [{
+                 'preserveIp': preserve_ip | bool
+               }]
+             }]
+           }}
+       loop: "{{ vm_name_id_pairs }}"
+       loop_control:
+         loop_var: vm_id
+       when: vm_id.name | lower in nodelist
+
+     - name: Get hardware info for selected VM
+       vmware.vmware_rest.vcenter_vm_hardware_ethernet_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+         vm: "{{ item.id }}"
+       loop: "{{ vms_for_plan_spec }}"
+       register: vm_nics
+
+     - name: Get detailed NIC info for each NIC
+       vmware.vmware_rest.vcenter_vm_hardware_ethernet_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+         vm: "{{ item.0.item.id }}"
+         nic: "{{ item.1.nic }}"
+       loop: "{{ vm_nics.results | subelements('value') }}"
+       register: detailed_nic_info
+
+     - name: Extract network IDs from detailed NIC info
+       set_fact:
+         vm_network_ids: "{{ vm_network_ids | default([]) + [item.value.backing.network] }}"
+       loop: "{{ detailed_nic_info.results }}"
+       when:
+         - item.value is defined
+         - item.value.backing is defined
+         - item.value.backing.network is defined
+
+     - name: Set fact for multiple source port groups
+       set_fact:
+         network_map_list: >-
+           [{% for pg in vm_network_ids %}
+             {
+              "source": {"id": "{{ pg }}"},
+              "destination": {
+                 "type": "multus",
+                 "name": "{{ target_network }}",
+                 "namespace": "default"
+               }
+             }{% if not loop.last %},{% endif %}
+           {% endfor %}]
+
+     - name: Create or Update Network Map
+       kubernetes.core.k8s:
+         kubeconfig: "{{ kubeconfig_path }}"
+           # api_key: "{{ ocp_token }}"
+           # host: "{{ ocp_api }}"
+         verify_ssl: false
+         state: present
+         definition:
+           apiVersion: forklift.konveyor.io/v1beta1
+           kind: NetworkMap
+           metadata:
+             name: "{{ network_map }}"
+             namespace: "{{ namespace }}"
+           spec:
+             map: "{{ network_map_list }}"
+             provider:
+               destination:
+                 name: "{{ destination_provider }}"
+                 namespace: "{{ namespace }}"
+               source:
+                 name: "{{ source_provider }}"
+                 namespace: "{{ namespace }}"
+
+     - name: Build a list of all the datastores
+       vmware.vmware_rest.vcenter_datastore_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+       register: all_the_datastores
+
+     - name: Build a list of all the datastores
+       vmware.vmware_rest.vcenter_vm_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+         vm: "{{ item.id }}"
+       loop: "{{ vms_for_plan_spec }}"
+       register: selected_vm_details
+
+     - name: Get hardware disk info for each selected VM
+       vmware.vmware_rest.vcenter_vm_hardware_disk_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+         vm: "{{ item.id }}"
+       loop: "{{ vms_for_plan_spec }}"
+       register: vm_disks
+
+     - name: Extract datastore names from VM disk info
+       set_fact:
+         vmdk_files: >-
+          {{
+            selected_vm_details.results
+            | map(attribute='value.disks')
+            | select('defined')
+            | map('dict2items')
+            | list
+            | flatten
+            | selectattr('value.backing.vmdk_file', 'defined')
+            | map(attribute='value.backing.vmdk_file')
+            | list
+          }}
+
+     - name: Extract unique datastore names from VMDK file paths
+       set_fact:
+         unique_datastores: "{{ vmdk_files | map('regex_replace', '^\\[([^\\]]+)\\].*', '\\1') | list }}"
+
+     - name: Initialize datastore ID map
+       set_fact:
+        datastore_name_id_map: {}
+
+     - name: Map each datastore name to its ID
+       set_fact:
+         datastore_name_id_map: >-
+            {{
+              datastore_name_id_map | combine({
+                item: (
+                  all_the_datastores.value
+                  | selectattr('name', 'equalto', item)
+                  | map(attribute='datastore')
+                  | list
+                )[0]
+              })
+            }}
+       loop: "{{ unique_datastores }}"
+
+     - name: Extract only datastore IDs from datastore_name_id_map
+       set_fact:
+          unique_datastores_ids: "{{ datastore_name_id_map.values() | list }}"
+
+     - name: Set fact for multiple source port groups
+       set_fact:
+         network_map_list: >-
+           [{% for did in unique_datastores_ids %}
+             {
+              "source": {"id": "{{ did }}"},
+              "destination": {
+                 "storageClass": "{{ target_storage }}"
+               }
+             }{% if not loop.last %},{% endif %}
+           {% endfor %}]
+
+     - name: Create or update a StorageMap
+       kubernetes.core.k8s:
+         kubeconfig: "{{ kubeconfig_path }}"
+           #api_key: "{{ ocp_token }}"
+           #  host: "{{ ocp_api }}"
+         verify_ssl: false
+         state: present
+         definition:
+           apiVersion: forklift.konveyor.io/v1beta1
+           kind: StorageMap
+           metadata:
+             name: "{{ storage_map }}"
+             namespace: "{{ namespace }}"
+           spec:
+             map: "{{ network_map_list }}"
+             provider:
+               destination:
+                 name: "{{ destination_provider }}"
+                 namespace: "{{ namespace }}"
+               source:
+                 name: "{{ source_provider }}"
+                 namespace: "{{ namespace }}"
+
+     - name: Deploy Migration Plan
+       kubernetes.core.k8s:
+         kubeconfig: "{{ kubeconfig_path }}"
+           #api_key: "{{ ocp_token }}"
+           #host: "{{ ocp_api }}"
+         verify_ssl: false
+         state: present
+         definition:
+           apiVersion: forklift.konveyor.io/v1beta1
+           kind: Plan
+           metadata:
+             name: "{{ plan_name }}"
+             namespace: "{{ namespace }}"
+           spec:
+             archived: false
+             description: ''
+             map:
+               network:
+                 name: "{{ network_map }}"
+                 namespace: "{{ namespace }}"
+               storage:
+                 name: "{{ storage_map }}"
+                 namespace: "{{ namespace }}"
+             provider:
+               destination:
+                 name: "{{ destination_provider }}"
+                 namespace: "{{ namespace }}"
+               source:
+                 name: "{{ source_provider }}"
+                 namespace: "{{ namespace }}"
+             targetNamespace: "{{ namespace }}"
+             vms: "{{ vms_for_plan_spec }}"
+             warm: "{{ warm_migrate | bool }}"
+             preserveStaticIPs: "{{ preserve_ip | bool }}"
+
+     - name: Combine cutover date and time to UTC ISO format
+       ansible.builtin.shell: |
+         date -u -d "{{ cutover_date }} {{ cutover_time }}" +%Y-%m-%dT%H:%M:%SZ
+       register: cutover_date_cmd
+       changed_when: false
+
+     - name: Set cutover_timestamp fact
+       set_fact:
+         cutover_timestamp: "{{ cutover_date_cmd.stdout }}"
+
+     - name: Create a Migration manifest to run the Plan CR
+       kubernetes.core.k8s:
+         kubeconfig: "{{ kubeconfig_path }}"
+         #api_key: "{{ ocp_token }}"
+         #host: "{{ ocp_api }}"
+         verify_ssl: false
+         api_version: forklift.konveyor.io/v1beta1
+         kind: Migration
+         namespace: "{{ namespace }}"
+         name: "{{ plan_name }}"
+         definition:
+           metadata:
+             name: "{{ plan_name }}"
+             namespace: "{{ namespace }}"
+           spec:
+             plan:
+               name: "{{ plan_name }}"
+               namespace: "{{ namespace }}"
+             cutover: "{{ cutover_timestamp }}"
+     
+     - name: OC Logout
+       command: oc --kubeconfig={{ kubeconfig_path }} logout
+
+     - name: Delete config file
+       file:
+         path: "{{ kubeconfig_path }}"
+         state: absent
+ 

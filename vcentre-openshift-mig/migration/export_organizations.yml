@@ -1,0 +1,12 @@
+---
+- name: Export all organizations
+  awx.awx.export:
+    organizations: 'all'
+  register: exported_info
+  delegate_to: localhost
+
+- name: Export data to file
+  ansible.builtin.copy:
+    # Fixes for inventory removing --- and some other introduced noise
+    content: "{{ exported_info | to_nice_yaml( width=50, explicit_start=True, explicit_end=True) |  regex_replace('assets:', '') | regex_replace('changed: false', '') | regex_replace('failed: false', '') | regex_replace('---', '') }}"
+    dest: "/tmp/export_files/organizations.yml"

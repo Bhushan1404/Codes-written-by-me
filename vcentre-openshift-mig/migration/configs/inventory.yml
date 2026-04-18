@@ -1,0 +1,108 @@
+
+
+    inventory:
+    -   description: ''
+        host_filter: null
+        insights_credential: null
+        kind: ''
+        name: Demo Inventory
+        natural_key:
+            name: Demo Inventory
+            organization:
+                name: Default
+                type: organization
+            type: inventory
+        organization:
+            name: Default
+            type: organization
+        related:
+            groups: []
+            hosts:
+            -   description: ''
+                enabled: true
+                instance_id: ''
+                inventory:
+                    name: Demo Inventory
+                    organization:
+                        name: Default
+                        type: organization
+                    type: inventory
+                name: 172.17.3.54
+                natural_key:
+                    inventory:
+                        name: Demo Inventory
+                        organization:
+                            name: Default
+                            type: organization
+                        type: inventory
+                    name: 172.17.3.54
+                    type: host
+                related:
+                    groups: []
+                variables: ''
+            -   description: ''
+                enabled: true
+                instance_id: ''
+                inventory:
+                    name: Demo Inventory
+                    organization:
+                        name: Default
+                        type: organization
+                    type: inventory
+                name: 172.17.3.59
+                natural_key:
+                    inventory:
+                        name: Demo Inventory
+                        organization:
+                            name: Default
+                            type: organization
+                        type: inventory
+                    name: 172.17.3.59
+                    type: host
+                related:
+                    groups: []
+                variables: ''
+        variables: ''
+    -   description: ''
+        host_filter: null
+        insights_credential: null
+        kind: ''
+        name: Test inventory
+        natural_key:
+            name: Test inventory
+            organization:
+                name: Default
+                type: organization
+            type: inventory
+        organization:
+            name: Default
+            type: organization
+        related:
+            groups: []
+            hosts:
+            -   description: ''
+                enabled: true
+                instance_id: ''
+                inventory:
+                    name: Test inventory
+                    organization:
+                        name: Default
+                        type: organization
+                    type: inventory
+                name: 172.17.3.55
+                natural_key:
+                    inventory:
+                        name: Test inventory
+                        organization:
+                            name: Default
+                            type: organization
+                        type: inventory
+                    name: 172.17.3.55
+                    type: host
+                related:
+                    groups: []
+                variables: ''
+        variables: ''
+
+
+...

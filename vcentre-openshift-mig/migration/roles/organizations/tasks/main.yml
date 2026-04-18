@@ -1,0 +1,35 @@
+---
+- name: Add organizations
+  awx.awx.organization:
+    name:                               "Wipro AAP"
+      #description:                        "{{ __controller_organizations_item.descrption |default() }}"
+      # custom_virtualenv:                  "{{ __controller_organizations_item.custom_virtualenv | default(omit, true) }}"
+      # max_hosts:                          "{{ __controller_organizations_item.max_hosts | default(omit, true) }}"
+      #  instance_groups:                    "{{ __controller_organizations_item.instance_groups | default() }}"
+      # default_environment:                "{{ (__controller_organizations_item.default_environment.name | default(__controller_organizations_item.default_environment | default(__controller_organizations_item.execution_environment | default(omit)))) if (assign_default_ee_to_org is defined and assign_default_ee_to_org) else omit }}"
+      # galaxy_credentials:                 "{{ __controller_organizations_item.galaxy_credentials | default() }}"
+      #   notification_templates_approvals:    "{{ (__controller_organizations_item.related.notification_templates_approvals | map(attribute='name') | list if __controller_organizations_item.related.notification_templates_approvals is defined) | default(__controller_organizations_item.notification_templates_approvals)  }}"
+      #  notification_templates_started:     "{{ (__controller_organizations_item.related.notification_templates_started | map(attribute='name') | list if __controller_organizations_item.related.notification_templates_started is defined) | default(__controller_organizations_item.notification_templates_started) }}"
+      #  notification_templates_success:     "{{ (__controller_organizations_item.related.notification_templates_success | map(attribute='name') | list if __controller_organizations_item.related.notification_templates_success is defined) | default(__controller_organizations_item.notification_templates_success) }}"
+      #  notification_templates_error:       "{{ (__controller_organizations_item.related.notification_templates_error | map(attribute='name') | list if __controller_organizations_item.related.notification_templates_error is defined) | default(__controller_organizations_item.notification_templates_error) }}"
+    state: present
+
+    # Role Standard Options
+    controller_username:                "admin"
+    controller_password:                "Wipro@123"
+      #controller_oauthtoken:              "{{ controller_oauthtoken | default(omit, true) }}"
+      #  request_timeout:                    "{{ controller_request_timeout | default(omit, true) }}"
+    controller_host:                    "https://172.17.3.55/"
+      #controller_config_file:             "{{ controller_config_file | default(omit, true) }}"
+    validate_certs:                     false
+      #  loop: "{{ organizations if organizations is defined else controller_organizations }}"
+      # loop_control:
+      #    loop_var: __controller_organizations_item
+      #  no_log: "{{ controller_configuration_organizations_secure_logging }}"
+      #  async: 1000
+      # poll: 0
+  register: __organizations_job_async
+    #  changed_when: not __organizations_job_async.changed
+  vars:
+    ansible_async_dir: 'null'
+
