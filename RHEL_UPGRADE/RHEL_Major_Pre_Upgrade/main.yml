@@ -1,0 +1,461 @@
+---
+# Play -1 (Create a ansible Dynamic in memory inventory)
+- name: "Play to Create a dynamic inventiry"
+  hosts: localhost
+  gather_facts: false
+  vars:
+    in_host_name: "{{ ipadd }}"
+    usr_hostname: "{{ hostname }}"
+    os_type_input: "{{ ostype }}"
+    os_type: "{{ os_type_input | capitalize }}"
+  tasks:
+    - name: Capture the details if any failed task while generating the in memory inventory
+      block:
+        - name: Split the Host IPAdd and name
+          ansible.builtin.set_fact:
+            host_name: "{{ in_host_name.split(',') }}"
+            input_hostname: "{{ usr_hostname.split(',') }}"
+          failed_when: in_host_name is undefined and usr_hostname is undefined
+
+        - name: Map the IPAdd and host name into inventory information
+          ansible.builtin.set_fact:
+            host_info: "{{ dict(host_name | zip(input_hostname)) | dict2items(key_name='in_host_name', value_name='usr_hostname') }}"
+          failed_when: host_name is undefined and input_hostname is undefined
+
+        - name: Block to create dynamic inventory when the OS type is Windows
+          block:
+            - name: Add the hosts into inventory group if it is Windows servers
+              ansible.builtin.add_host:
+                name: "{{ item.in_host_name }}"
+                input_hostname: "{{ item.usr_hostname }}"
+                os_type: "{{ os_type | default() }}"
+                ansible_user: root
+                ansible_password: Wipro@123
+                ansible_ssh_port: 22
+                group: exec_nodes
+              loop: "{{ host_info | default('') }}"
+              when: host_info is defined
+      rescue:
+        - name: ServiceTheater failure update
+          ansible.builtin.debug:
+            msg:
+              - "target_host          : {{ inventory_hostname }}"
+              - "task_name            : {{ ansible_failed_task['name'] }}"
+              - "status_msg           : {{ ansible_failed_result['msg'] }}"
+              - "status               : failed "
+              - "execution_date_time  : {{ ansible_date_time['iso8601'] }}"
+
+        - name: Failed the playbook execution if main block having any failed taks
+          ansible.builtin.fail:
+            msg: "Error occurred while generating the inmemory inventory"
+
+- name: Play to fetch configuration details on the target server
+  hosts: exec_nodes
+  gather_facts: false
+  collections:
+    - community.general
+  vars:
+    leapp_packages:
+      - leapp-upgrade
+      - leapp-repository
+    leapp_packages_cockpit:
+      - cockpit-leapp
+    yum_version_lock_pkg:
+      - yum-plugin-versionlock
+    rhsm_repositories:
+      - rhel-7-server-rpms
+      - rhel-7-server-optional-rpms
+      - rhel-7-server-extras-rpms
+    rhel8_os_repo: 'rhel-8-baseos-rpms'
+    rhel8_app_repo: 'rhel-8-appstream-rpms'
+    leapp_preupg_opts: '--no-rhsm'
+    log_path: '/tmp/st_auto/inplace_upgrade/'
+    log_file: "leapp_pre_upgrade_log_{{ ansible_hostname | default() }}_{{ ansible_date_time['iso8601'] }}"
+    log_dir: '/tmp/st_auto/inplace_upgrade'
+    leapp_json_report: '/tmp/st_auto/inplace_upgrade_/{{ inventory_hostname }}/leapp-report-preupgrade.json'
+    leapp_text_report: '/tmp/st_auto/inplace_upgrade_/{{ inventory_hostname }}/leapp-report-preupgrade.txt'
+    os_version: "{{ rhel_version }}"
+    target_option: '--target'
+    filesystem_to_check:
+      - '/boot'
+  tasks:           
+    # Leapp preupgrade report generation for validation
+    - name: Generate leapp pre_upgrade report  
+      block:
+        # Run the setup and collect the required minimal facts
+        - name: Run setup module
+          ansible.builtin.setup:
+          register: system_facts
+
+        - name: Initialize the filesystem information 
+          ansible.builtin.set_fact:
+            filesystem_info: "{{ filesystem_info | default({}) }}"
+          loop: "{{ filesystem_to_check }}"
+          loop_control:
+            loop_var: item
+          when: "system_facts.ansible_facts.ansible_mounts | selectattr('mount', '==', item) | list | length > 0"
+
+        - name: Gather filesystem information details
+          ansible.builtin.set_fact:
+            filesystem_info: "{{ filesystem_info | combine({item: filesystem_info_item}) }}"
+          vars:
+            filesystem_info_item: "{{ system_facts.ansible_facts.ansible_mounts | selectattr('mount', '==', item) | list | first }}"
+          loop: "{{ filesystem_to_check }}"
+          loop_control:
+            loop_var: item
+          when: "system_facts.ansible_facts.ansible_mounts | selectattr('mount', '==', item) | list | length > 0"
+
+        - name: Calculate free space percentage for filesystem
+          ansible.builtin.set_fact:
+            filesystem_info: "{{ filesystem_info | combine({item: filesystem_info[item] | combine({'filesystem_free_percent': (100 * filesystem_info[item].size_available / filesystem_info[item].size_total)|int }) }) }}"
+          loop: "{{ filesystem_to_check }}"
+          loop_control:
+            loop_var: item
+          when: "filesystem_info[item] is defined"
+
+        - name: Check free space percentage for filesystem
+          ansible.builtin.assert:
+            that: "'filesystem_free_percent' not in filesystem_info[item] or filesystem_info[item].filesystem_free_percent >= 40"
+            fail_msg: "At least one filesystem has less than 40% free space!"
+          loop: "{{ filesystem_to_check }}"
+          loop_control:
+            loop_var: item
+          when: "filesystem_info[item] is defined"
+          
+        - name: Gather latest package facts
+          ansible.builtin.package_facts:
+            manager: auto
+
+        - name: Install leapp packages if it is not already installed
+          ansible.builtin.yum:
+            name: "{{ leapp_packages }}"
+            state: latest
+            disablerepo: "*"  
+            enablerepo: "{{ rhsm_repositories }}"
+          when: '"leapp" not in ansible_facts.packages'
+          register: leapp_pkg
+
+        - name: Print output of leapp packages details
+          ansible.builtin.debug:
+            var: leapp_pkg
+            
+        - name: Remove of leapp_upgrade repo file exists
+          ansible.builtin.file:
+            path: /etc/leapp/files/leapp_upgrade_repositories.repo
+            state: absent
+
+        - name: Ensure leapp log directory exists
+          ansible.builtin.file:
+            path: /var/log/leapp
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+            
+        - name: Remove a directory for log report if it exists
+          ansible.builtin.file:
+            path: '{{ log_dir }}'
+            state: absent
+
+        - name: Create a directory for log report if it does not exists
+          ansible.builtin.file:
+            path: '{{ log_dir }}'
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Check if any previous pre_upgrade reports
+          ansible.builtin.stat:
+            path: '{{ item }}'
+          register: file_stat
+          loop:
+            - /var/log/leapp/leapp-report.txt
+            - /var/log/leapp/leapp-report.json
+
+        - name: Cleanup previous pre_upgrade reports if any
+          ansible.builtin.file:
+            path: '{{ item }}'
+            state: absent
+          loop:
+            - /var/log/leapp/leapp-report.txt
+            - /var/log/leapp/leapp-report.json
+
+        - name: Leapp preupgrade report genration for specific version
+          ansible.builtin.shell: >
+            leapp preupgrade {{ target_option | default('') }} {{ os_version | default('') }} 2>&1 | tee -a {{ log_path | default('') }}{{ log_file | default('') }}
+          register: leapp_specific
+          args:
+            executable: /bin/bash
+          when: os_version is defined and os_version | length > 0 and rhel_version is defined and rhel_version | length > 0
+
+        - name: Leapp preupgrade report genration
+          ansible.builtin.shell: >
+            leapp preupgrade 2>&1 | tee -a {{ log_path | default('') }}{{ log_file | default('') }}
+          register: leapp_latest
+          args:
+            executable: /bin/bash
+          when: |
+            (os_version is not defined or os_version | length == 0) or (rhel_version is not defined or rhel_version | length == 0) or 
+            ('latest' in os_version)
+          
+        - name: Remove log report directory on localhost
+          ansible.builtin.file:
+            path: '{{ log_dir }}'
+            state: absent
+          delegate_to: localhost
+
+        - name: Gather leapp preupgrade report (Text)
+          ansible.builtin.fetch:
+            src: /var/log/leapp/leapp-report.txt
+            dest: '{{ leapp_text_report }}'
+            flat: yes
+
+        - name: Gather leapp preupgrade report (JSON)
+          ansible.builtin.fetch:
+            src: /var/log/leapp/leapp-report.json
+            dest: '{{ leapp_json_report }}'
+            flat: yes
+
+        - name: Load leapp preupgrade report
+          include_vars:
+            file: '{{ leapp_json_report }}'
+            name: leapp_preupgrade_report
+
+        - name: Set appropriate facts based on the report
+          ansible.builtin.set_fact:
+            leapp_preupgrade_report_info: '{{ leapp_preupgrade_report["entries"] | selectattr("severity", "match", "info") | list }}'
+            leapp_preupgrade_report_low: '{{ leapp_preupgrade_report["entries"] | selectattr("severity", "match", "low") | list }}'
+            leapp_preupgrade_report_medium: '{{ leapp_preupgrade_report["entries"] | selectattr("severity", "match", "medium") | list }}'
+            leapp_preupgrade_report_high: '{{ leapp_preupgrade_report["entries"] | selectattr("severity", "match", "high") | list }}'
+            leapp_preupgrade_report_inhibitors: '{{ leapp_preupgrade_report.entries | selectattr("flags", "search", "inhibitor") | list }}'
+
+        - name: Print only inhibitors details
+          ansible.builtin.debug:
+            var: leapp_preupgrade_report_inhibitors
+          when: leapp_preupgrade_report_inhibitors | length > 0
+
+        - name: Print leapp preupgrade statistics
+          ansible.builtin.debug:
+            msg: >
+              {{ leapp_preupgrade_report_info | length }} Info Messages,
+              {{ leapp_preupgrade_report_low | length }} Low Severity Issues,
+              {{ leapp_preupgrade_report_high | length }} High Severity Issues,
+              {{ leapp_preupgrade_report_inhibitors | length }} Inhibitors
+      rescue:
+        - name: Update
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default() }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+ 
+        - name: End the play if any task failed
+          ansible.builtin.fail:
+            msg: "Play execution is failed for more information please check the failed task"
+    
+    # Remediation block for common inhibitors
+    - name: Remediation block for common inhibitors
+      block:
+        - name: Configure sshd service
+          ansible.builtin.lineinfile:
+            path: /etc/ssh/sshd_config
+            regexp: '^PermitRootLogin'
+            line: PermitRootLogin yes
+          register: permit_root_login
+          when:
+            - 'leapp_preupgrade_report["entries"] | selectattr("title", "match", "Possible problems with remote login using root account") | list | length > 0'
+
+        - name: Restart sshd
+          ansible.builtin.service:
+            name: sshd.service
+            state: restarted
+          when:
+            - 'leapp_preupgrade_report["entries"] | selectattr("title", "match", "Possible problems with remote login using root account") | list | length > 0'          
+          
+        - name: Print the sshd remediation action
+          ansible.builtin.debug:
+            var: permit_root_login
+
+        - name: Remove PAM module
+          ansible.builtin.shell: |
+            leapp answer --section remove_pam_pkcs11_module_check.confirm=True
+          register: pam_module
+          when:
+            - 'leapp_preupgrade_report["entries"] | selectattr("title", "match", "Missing required answers in the answer file") | list | length > 0'
+
+        - name: Print PAM remediation action
+          ansible.builtin.debug:
+            var: pam_module
+
+        - name: Remove kernel drivers which are removed in RHEL 8
+          ansible.builtin.shell: |
+            modprobe -r pata_acpi
+            modprobe -r floppy
+          register: kernel_drivers
+          when:
+            - 'leapp_preupgrade_report["entries"] | selectattr("title", "match", "Leapp detected loaded kernel drivers which have been removed in RHEL 8. Upgrade cannot proceed.") | list | length > 0'
+
+        - name: Print kernel drivers remediation action
+          ansible.builtin.debug:
+            var: kernel_drivers
+            
+        - name: Check if any vsftpd is configured
+          ansible.builtin.stat:
+            path: /etc/vsftpd/vsftpd.conf
+          register: vsftpd_conf
+        
+        - name: Disable tcp wrappers if vsftpd configured
+          ansible.builtin.lineinfile:
+            path: /etc/vsftpd/vsftpd.conf
+            regexp: '^\S*tcp_wrappers\S*='
+            line: "# tcp_wrappers=yes"
+            backup: yes
+          when: vsftpd_conf.stat.exists
+           
+        - name: Check allow all host config file in vsftpd
+          ansible.builtin.stat:
+            path: /etc/hosts.allow
+          register: allow_conf
+            
+        - name: Disable allow all host in vsftpd
+          ansible.builtin.lineinfile:
+            path: /etc/hosts.allow
+            regexp: '^ALL:ALL:ALLOW'
+            line: "# ALL:ALL:ALLOW"
+            backup: yes
+          when: allow_conf.stat.exists and vsftpd_conf.stat.exists
+        
+        - name: Restart vsftpd service
+          ansible.builtin.systemd:
+            name: vsftpd
+            state: restarted
+          when: vsftpd_conf.stat.exists
+          
+        - name: Comment pam_tally2 module line if it's not already commented
+          ansible.builtin.replace:
+            path: /etc/pam.d/system-auth
+            regexp: "^auth        required      pam_tally2.so"
+            replace: "#auth        required      pam_tally2.so"
+          become: yes
+      rescue:
+        - name: Update
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default() }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        - name: End the play if any task failed
+          ansible.builtin.fail:
+            msg: "Play execution is failed for more information please check the failed task"
+
+    # Post remediation Checks
+    - name: Generate leapp pre_upgrade report after remediation
+      block: 
+        - name: Remove log directory on target machine if it is exist
+          ansible.builtin.file:
+            path: /tmp/st_auto/inplace_upgrade
+            state: absent
+            
+        - name: Create a directory for log report
+          ansible.builtin.file:
+            path: /tmp/st_auto/inplace_upgrade
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+            
+        - name: Cleanup previous pre_upgrade reports
+          ansible.builtin.file:
+            path: '{{ item }}'
+            state: absent
+          loop:
+            - /var/log/leapp/leapp-report.txt
+            - /var/log/leapp/leapp-report.json
+          
+        - name: Leapp preupgrade report genration for specific version
+          ansible.builtin.shell: >
+            leapp preupgrade {{ target_option | default('') }} {{ os_version | default('') }} 2>&1 | tee -a {{ log_path | default('') }}{{ log_file | default('') }}
+          register: leapp_specific_post
+          args:
+            executable: /bin/bash
+          when: os_version is defined and os_version | length > 0 and rhel_version is defined and rhel_version | length > 0
+
+        - name: Leapp preupgrade report genration
+          ansible.builtin.shell: >
+            leapp preupgrade 2>&1 | tee -a {{ log_path | default('') }}{{ log_file | default('') }}
+          register: leapp_post
+          args:
+            executable: /bin/bash
+          when: |
+            (os_version is not defined or os_version | length == 0) or (rhel_version is not defined or rhel_version | length == 0) or
+            ('latest' in os_version)
+          
+        - name: Remove log report directory on locahost
+          ansible.builtin.file:
+            path: /tmp/st_auto/inplace_upgrade
+            state: absent
+          delegate_to: localhost
+
+        - name: Gather leapp preupgrade report (Text)
+          ansible.builtin.fetch:
+            src: /var/log/leapp/leapp-report.txt
+            dest: '{{ leapp_text_report }}'
+            flat: yes
+
+        - name: Gather leapp preupgrade report (JSON)
+          ansible.builtin.fetch:
+            src: /var/log/leapp/leapp-report.json
+            dest: '{{ leapp_json_report }}'
+            flat: yes
+
+        - name: Load leapp preupgrade report
+          include_vars:
+            file: '{{ leapp_json_report }}'
+            name: leapp_preupgrade_post_report
+            
+        - name: Set appropriate facts based on the report
+          ansible.builtin.set_fact:
+            leapp_preupgrade_post_report_info: '{{ leapp_preupgrade_post_report["entries"] | selectattr("severity", "match", "info") | list }}'
+            leapp_preupgrade_post_report_low: '{{ leapp_preupgrade_post_report["entries"] | selectattr("severity", "match", "low") | list }}'
+            leapp_preupgrade_post_report_medium: '{{ leapp_preupgrade_post_report["entries"] | selectattr("severity", "match", "medium") | list }}'
+            leapp_preupgrade_post_report_high: '{{ leapp_preupgrade_post_report["entries"] | selectattr("severity", "match", "high") | list }}'
+            leapp_preupgrade_post_report_inhibitors: '{{ leapp_preupgrade_post_report.entries | selectattr("flags", "search", "inhibitor") | list }}'
+            
+        - name: Print only inhibitors details
+          ansible.builtin.debug:
+            var: leapp_preupgrade_post_report_inhibitors
+          when: leapp_preupgrade_post_report_inhibitors | length > 0
+
+        - name: Print leapp preupgrade statistics
+          ansible.builtin.debug:
+            msg: >
+              {{ leapp_preupgrade_post_report_info | length }} Info Messages,
+              {{ leapp_preupgrade_post_report_low | length }} Low Severity Issues,
+              {{ leapp_preupgrade_post_report_high | length }} High Severity Issues,
+              {{ leapp_preupgrade_post_report_inhibitors | length }} Inhibitors
+
+        - name: Fail playbook if inhibitors are found
+          fail:
+            msg: >
+              Inhibitors are still found in the leapp preupgrade report after remediation of some Inhibitors.
+              Please resolve them manually before proceeding.
+          when: leapp_preupgrade_post_report_inhibitors | length > 0
+      rescue:
+        - name: Update
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default() }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        - name: End the play if any task failed
+          ansible.builtin.fail:
+            msg: "Play execution is failed for more information please check the failed task"

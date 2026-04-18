@@ -1,0 +1,166 @@
+---
+# Play -1 (Create a ansible Dynamic in memory inventory)
+- name: "Play to Create a dynamic inventiry"
+  hosts: localhost
+  gather_facts: false
+  vars:
+    in_host_name: "{{ ipadd }}"
+    usr_hostname: "{{ hostname }}"
+    os_type_input: "{{ ostype }}"
+    os_type: "{{ os_type_input | capitalize }}"
+  tasks:
+    - name: Capture the details if any failed task while generating the in memory inventory
+      block:
+        - name: Split the Host IPAdd and name
+          ansible.builtin.set_fact:
+            host_name: "{{ in_host_name.split(',') }}"
+            input_hostname: "{{ usr_hostname.split(',') }}"
+          failed_when: in_host_name is undefined and usr_hostname is undefined
+
+        - name: Map the IPAdd and host name into inventory information
+          ansible.builtin.set_fact:
+            host_info: "{{ dict(host_name | zip(input_hostname)) | dict2items(key_name='in_host_name', value_name='usr_hostname') }}"
+          failed_when: host_name is undefined and input_hostname is undefined
+
+        - name: Block to create dynamic inventory when the OS type is Windows
+          block:
+            - name: Add the hosts into inventory group if it is Windows servers
+              ansible.builtin.add_host:
+                name: "{{ item.in_host_name }}"
+                input_hostname: "{{ item.usr_hostname }}"
+                os_type: "{{ os_type | default() }}"
+                ansible_user: root
+                ansible_password: Wipro@123
+                ansible_ssh_port: 22
+                group: exec_nodes
+              loop: "{{ host_info | default('') }}"
+              when: host_info is defined
+      rescue:
+        - name: ServiceTheater failure update
+          ansible.builtin.debug:
+            msg:
+              - "target_host          : {{ inventory_hostname }}"
+              - "task_name            : {{ ansible_failed_task['name'] }}"
+              - "status_msg           : {{ ansible_failed_result['msg'] }}"
+              - "status               : failed "
+              - "execution_date_time  : {{ ansible_date_time['iso8601'] }}"
+
+        - name: Failed the playbook execution if main block having any failed taks
+          ansible.builtin.fail:
+            msg: "Error occurred while generating the inmemory inventory"
+
+- name: Play for RHEL inplace upgrade
+  hosts: exec_nodes
+  gather_facts: true
+  become: true
+  collections:
+    - community.general
+  vars:
+    leapp_preupg_opts: '--no-rhsm'
+    log_path: '/tmp/st_auto/inplace_upgrade/'
+    log_file: "leapp_upgrade_log_{{ ansible_hostname | default() }}_{{ ansible_date_time['iso8601'] }}"
+    os_version: "{{ rhel_version }}"
+    target_option: '--target'  
+    kernel_version_to: '4.18'
+    post_reboot_task_delay: 120
+    pre_reboot_task_delay: 0
+    connect_task_timeout: 10
+    reboot_task_timeout: 3600
+    task_timeout: 3660
+    rhel8_os_repo: 'rhel-8-baseos-rpms'
+    rhel8_app_repo: 'rhel-8-appstream-rpms'
+  tasks:         
+    - name: Block to perform RHEL major upgrade
+      block:
+        - name: Leapp upgrade for specific RHEL 8.x version
+          ansible.builtin.shell: >
+            set -o pipefail;
+            leapp upgrade
+            {{ target_option | default('') }} 
+            {{ os_version | default('') }} 
+            2>&1 | tee -a {{ log_path | default('') }}{{ log_file | default('') }}
+          register: leapp_specific
+          args:
+            executable: /bin/bash
+          when: os_version is defined and os_version | length > 0 and rhel_version is defined and rhel_version | length > 0 and ('latest' not in os_version)
+          async: 3600
+          poll: 60
+
+        - name: Leapp upgrade for latest RHEL 8 version
+          ansible.builtin.shell: >
+            set -o pipefail;
+            leapp upgrade
+            2>&1 | tee -a {{ log_path | default('') }}{{ log_file | default('') }}
+          register: leapp_latest
+          args:
+            executable: /bin/bash
+          when: (os_version is not defined or os_version | length == 0) or (rhel_version is not defined or rhel_version | length == 0) or ('latest' in os_version)
+          async: 3600
+          poll: 60
+
+        - name: Reboot to continue Leapp OS upgrade
+          ansible.builtin.reboot:
+            msg: "Host is starting Leapp OS upgrade now!"
+            connect_timeout: "{{ connect_task_timeout }}"
+            reboot_timeout: "{{ reboot_task_timeout }}"
+            pre_reboot_delay: "{{ pre_reboot_task_delay }}"
+            post_reboot_delay: "{{ post_reboot_task_delay }}"
+            test_command: uptime
+          timeout: "{{ task_timeout }}"
+          
+        - name: Set python interpreter to use python3 since python no longer available in RHEL 8
+          ansible.builtin.set_fact:
+            ansible_python_interpreter: /usr/bin/python3
+
+        - name: Gather latest system facts
+          ansible.builtin.setup:
+
+        - name: Verify post-upgrade system status
+          ansible.builtin.assert:
+            that:
+              - 'ansible_distribution_major_version | int == 8'
+              - 'ansible_kernel is match(kernel_version_to)'
+            fail_msg: 'RHEL 8.x upgrade is not completed'  
+            success_msg: 'RHEL 8.x upgrade is completed successfully'
+      rescue:
+        - name: ServiceTheater Update
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default() }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+ 
+        - name: End the play if any task failed
+          ansible.builtin.fail:
+            msg: "Play execution is failed for more information please check the failed task"
+            
+    - name: Block for perform post upgrade cleanup action 
+      block:
+        - name: Clean dnf exclude list if any
+          ansible.builtin.shell: |
+            dnf config-manager --save --setopt exclude=''
+           
+        - name: Gather Non-RHEL packages list
+          ansible.builtin.shell:
+            cmd: rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\t%{VENDOR}\n' | grep -v 'Red Hat, Inc.' | sort
+          register: non_rhel_pkgs
+          ignore_errors: yes
+          
+        - name: Print Non-RHEL signre package list
+          ansible.builtin.debug:
+            msg: List of non RHEL packages "{{ non_rhel_pkgs.stdout_lines }}"     
+      rescue:
+        - name: ServiceTheater Failure Update
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default ('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time:"
+              
+        - name: End the play if any task failed
+          ansible.builtin.fail:
+            msg: "Please check failed task for more details."

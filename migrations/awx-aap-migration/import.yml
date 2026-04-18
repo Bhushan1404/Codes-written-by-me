@@ -1,0 +1,339 @@
+---
+- name: Import all configuration from AWX to AAP
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - awx.awx
+  vars_files:
+    - vault.yml
+  tasks:
+    - name: Load exported JSON file
+      slurp:
+        src: "./awx_full_export.json"
+      register: export_file
+
+    - name: Set exported assets
+      set_fact:
+        exported_assets: "{{ export_file.content | b64decode | from_json }}"
+    - name: Import schedules
+      awx.awx.schedule:
+        name: "{{ item.name }}"
+        description: "{{ item.description | default('') }}"
+        rrule: "{{ item.rrule }}"
+        enabled: "{{ item.enabled }}"
+        unified_job_template: "{{ item.unified_job_template.name if item.unified_job_template is defined else omit }}"
+        state: present
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        validate_certs: "{{ aap_verify_ssl }}"
+      loop: "{{ exported_assets.schedules | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+    - name: Create all organizations on AAP
+      awx.awx.organization:
+        name: "{{ item.name }}"
+        description: "{{ item.description | default('') }}"
+        custom_virtualenv: "{{ item.custom_virtualenv | default(omit) }}"
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        tower_verify_ssl: "{{ aap_verify_ssl }}"
+        state: present
+      loop: "{{ exported_assets.organizations }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.name != 'Default'
+
+    - name: Create all users on AAP
+      awx.awx.user:
+        username: "{{ item.username }}"
+        first_name: "{{ item.first_name | default('') }}"
+        last_name: "{{ item.last_name | default('') }}"
+        email: "{{ item.email | default('') }}"
+        is_superuser: "{{ item.is_superuser | default(false) }}"
+        password: "{{ item.password |default('DefaultP@ssword123')}}"
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        tower_verify_ssl: "{{ aap_verify_ssl }}"
+        state: present
+      loop: "{{ exported_assets.users }}"
+      loop_control:
+        label: "{{ item.username }}"
+      when: item.username != 'admin'
+
+    - name: Create all teams on AAP
+      awx.awx.team:
+        name: "{{ item.name }}"
+        description: "{{ item.description | default('') }}"
+        organization: "{{ item.organization.name }}"
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        tower_verify_ssl: "{{ aap_verify_ssl }}"
+        state: present
+      loop: "{{ exported_assets.teams }}"
+      loop_control:
+        label: "{{ item.name }}"
+    - name: Create credentials on AAP
+      awx.awx.credential:
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        credential_type: "{{ item.credential_type.name }}"
+        inputs: >-
+          {{
+            item.inputs | combine({
+              'password': (
+                item.inputs.password == '$encrypted$'
+                and item.inputs.username in username_password_map
+              ) | ternary(
+                username_password_map[item.inputs.username],
+                item.inputs.password
+              )
+            })
+          }}
+        organization: "{{ item.organization.name if item.organization else 'Default' }}"
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        tower_verify_ssl: "{{ aap_verify_ssl }}"
+        state: present
+      loop: "{{ exported_assets.credentials }}"
+    - name: Create inventories on AAP
+      awx.awx.inventory:
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        organization: "{{ item.organization.name if item.organization else 'Default' }}"
+        variables: >-
+          {{
+            (item.variables | from_yaml)
+            if (item.variables is string and item.variables.strip() not in ['', '---', 'null', '~'])
+            else {}
+          }}
+        kind: "{{ item.kind }}"
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        tower_verify_ssl: "{{ aap_verify_ssl }}"
+        state: present
+      loop: "{{ exported_assets.inventory }}"
+
+    - name: Set inventories with hosts
+      set_fact:
+        inventories_with_hosts: >-
+          {{ exported_assets.inventory
+             | selectattr('related.hosts', 'defined')
+             | selectattr('related.hosts', '!=', [])
+             | list }}
+
+    - name: Create all hosts in all inventories
+      awx.awx.host:
+        name: "{{ item.name }}"
+        inventory: >-
+          {{
+            (
+             exported_assets.inventory
+             | selectattr('name', 'equalto', item.inventory.name)
+             | list
+             | first
+            ).name | default('Default')
+          }}
+        description: "{{ item.description }}"
+        enabled: "{{ item.enabled }}"
+        variables: >-
+         {{
+           (item.variables | from_yaml)
+           if (item.variables is string and item.variables.strip() not in ['', '---', 'null', '~'])
+           else {}
+         }}
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        tower_verify_ssl: "{{ aap_verify_ssl }}"
+        state: present
+      loop: "{{ exported_assets.inventory | map(attribute='related.hosts') | list | flatten(levels=1) }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Create all projects on AAP
+      awx.awx.project:
+        name: "{{ item.name }}"
+        description: "{{ item.description }}"
+        organization: "{{ item.organization.name if item.organization is defined else 'Default' }}"
+        scm_type: "{{ item.scm_type }}"
+        scm_url: "{{ item.scm_url }}"
+        scm_branch: "{{ item.scm_branch | default('') }}"
+        credential: >-
+          {{
+            (item.credential.name)
+            if (item.credential is defined and item.credential is not none and 'name' in item.credential)
+            else omit
+          }}
+        local_path: "{{ item.local_path | default(omit) }}"
+        scm_update_cache_timeout: "{{ item.scm_update_cache_timeout | default(0) }}"
+        scm_update_on_launch: "{{ item.scm_update_on_launch | default(false) }}"
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        tower_verify_ssl: "{{ aap_verify_ssl }}"
+        state: present
+      loop: "{{ exported_assets.projects }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.scm_type == 'git'
+    - name: Create all job templates on AAP
+      awx.awx.job_template:
+        name: "{{ item.name }}"
+        description: "{{ item.description | default('') }}"
+        job_type: "{{ item.job_type | default('run') }}"
+        inventory: "{{ item.inventory.name }}"
+        project: "{{ item.project.name }}"
+        playbook: "{{ item.playbook }}"
+        credentials: >-
+          {{
+            (item.related.credentials | map(attribute='name') | list)
+            if item.related.credentials is defined and item.related.credentials|length > 0
+            else omit
+          }}
+        forks: "{{ item.forks | default(0) }}"
+        verbosity: "{{ item.verbosity | default(0) }}"
+        timeout: "{{ item.timeout | default(0) }}"
+        allow_simultaneous: "{{ item.allow_simultaneous }}"
+        diff_mode: "{{ item.diff_mode }}"
+        become_enabled: "{{ item.become_enabled }}"
+        ask_variables_on_launch: "{{ item.ask_variables_on_launch }}"
+        state: present
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        tower_verify_ssl: "{{ aap_verify_ssl }}"
+      loop: "{{ exported_assets.job_templates }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Get organization ID by name
+      uri:
+        url: "{{ aap_host }}/api/v2/organizations/?name={{ item.organization.name }}"
+        method: GET
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ aap_verify_ssl }}"
+        return_content: yes
+      register: org_lookup
+      loop: "{{ exported_assets.applications }}"
+      delegate_to: localhost
+
+    - name: Create OAuth Application via API
+      uri:
+        url: "{{ aap_host }}/api/v2/applications/"
+        method: POST
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        force_basic_auth: yes
+        status_code: [201 ,400]
+        validate_certs: "{{ aap_verify_ssl }}"
+        headers:
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ item.item.name }}"
+          description: "{{ item.item.description | default('') }}"
+          organization: "{{ (item.json.results | first).id }}"
+          client_type: "{{ item.item.client_type }}"
+          authorization_grant_type: "{{ item.item.authorization_grant_type }}"
+          redirect_uris: "{{ item.item.redirect_uris | default('') }}"
+          skip_authorization: "{{ item.item.skip_authorization | default(false) }}"
+      loop: "{{ org_lookup.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Get organization ID by name
+      uri:
+        url: "{{ aap_host }}/api/v2/organizations/?name={{ item.organization.name }}"
+        method: GET
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        force_basic_auth: yes
+        validate_certs: "{{ aap_verify_ssl }}"
+        return_content: yes
+      register: org_lookup_notification
+      loop: "{{ exported_assets.notification_templates }}"
+      delegate_to: localhost
+
+    - name: Import notification templates if not already present
+      uri:
+        url: "{{ aap_host }}/api/v2/notification_templates/"
+        method: POST
+        user: "{{ aap_username }}"
+        password: "{{ aap_password }}"
+        force_basic_auth: yes
+        status_code: [201 ,400, 200]
+        validate_certs: "{{ aap_verify_ssl }}"
+        headers:
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ item.item.name }}"
+          description: "{{ item.item.description | default('') }}"
+          organization: "{{ (item.json.results | first).id }}"
+          notification_type: "{{ item.item.notification_type }}"
+          notification_configuration: "{{ item.item.notification_configuration }}"
+          messages: "{{ item.item.messages if item.item.messages is mapping else {} }}"
+          state: present
+      loop: "{{ org_lookup_notification.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Import credential types
+      awx.awx.credential_type:
+        name: "{{ item.name }}"
+        description: "{{ item.description | default('') }}"
+        kind: "{{ item.kind }}"
+        inputs: "{{ item.inputs }}"
+        injectors: "{{ item.injectors }}"
+        state: present
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        validate_certs: "{{ aap_verify_ssl }}"
+      loop: "{{ exported_assets.credential_types | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      ignore_errors: yes
+
+    - name: Import inventory sources
+      awx.awx.inventory_source:
+        name: "{{ item.name }}"
+        inventory: "{{ item.inventory.name }}"
+        source: "{{ item.source }}"
+        source_path: "{{ item.source_path | default(omit) }}"
+        source_project: "{{ item.source_project.name if item.source_project is defined else omit }}"
+        update_on_launch: "{{ item.update_on_launch | default(false) }}"
+        state: present
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        validate_certs: "{{ aap_verify_ssl }}"
+      loop: "{{ exported_assets.inventory_sources | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Import workflow job templates
+      awx.awx.workflow_job_template:
+        name: "{{ item.name }}"
+        description: "{{ item.description | default('') }}"
+        organization: "{{ item.organization.name if item.organization is defined else omit }}"
+        inventory: "{{ item.inventory.name if item.inventory is defined else omit }}"
+        project: "{{ item.project.name if item.project is defined else omit }}"
+        playbook: "{{ item.playbook }}"
+        state: present
+        controller_host: "{{ aap_host }}"
+        controller_username: "{{ aap_username }}"
+        controller_password: "{{ aap_password }}"
+        validate_certs: "{{ aap_verify_ssl }}"
+      loop: "{{ exported_assets.workflow_job_templates | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+

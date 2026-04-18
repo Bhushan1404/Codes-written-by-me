@@ -1,0 +1,73 @@
+
+
+    schedules:
+    -   description: Automatically Generated Schedule
+        enabled: true
+        extra_data:
+            days: '120'
+        name: Cleanup Job Schedule
+        natural_key:
+            name: Cleanup Job Schedule
+            type: schedule
+            unified_job_template:
+                name: Cleanup Job Details
+                type: system_job_template
+        related:
+            credentials: []
+        rrule: DTSTART:20230616T205427Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=SU
+        unified_job_template:
+            name: Cleanup Job Details
+            type: system_job_template
+    -   description: Automatically Generated Schedule
+        enabled: true
+        extra_data:
+            days: '355'
+        name: Cleanup Activity Schedule
+        natural_key:
+            name: Cleanup Activity Schedule
+            type: schedule
+            unified_job_template:
+                name: Cleanup Activity Stream
+                type: system_job_template
+        related:
+            credentials: []
+        rrule: DTSTART:20230616T205427Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=TU
+        unified_job_template:
+            name: Cleanup Activity Stream
+            type: system_job_template
+    -   description: Cleans out expired browser sessions
+        enabled: true
+        extra_data: {}
+        name: Cleanup Expired Sessions
+        natural_key:
+            name: Cleanup Expired Sessions
+            type: schedule
+            unified_job_template:
+                name: Cleanup Expired Sessions
+                type: system_job_template
+        related:
+            credentials: []
+        rrule: DTSTART:20230616T205559Z RRULE:FREQ=WEEKLY;INTERVAL=1
+        unified_job_template:
+            name: Cleanup Expired Sessions
+            type: system_job_template
+    -   description: Removes expired OAuth 2 access
+            and refresh tokens
+        enabled: true
+        extra_data: {}
+        name: Cleanup Expired OAuth 2 Tokens
+        natural_key:
+            name: Cleanup Expired OAuth 2 Tokens
+            type: schedule
+            unified_job_template:
+                name: Cleanup Expired OAuth 2 Tokens
+                type: system_job_template
+        related:
+            credentials: []
+        rrule: DTSTART:20230616T205600Z RRULE:FREQ=WEEKLY;INTERVAL=1
+        unified_job_template:
+            name: Cleanup Expired OAuth 2 Tokens
+            type: system_job_template
+
+
+...

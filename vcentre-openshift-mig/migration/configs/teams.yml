@@ -1,0 +1,32 @@
+
+
+    teams:
+    -   description: ''
+        name: AWX Test Teams
+        natural_key:
+            name: AWX Test Teams
+            organization:
+                name: Default
+                type: organization
+            type: team
+        organization:
+            name: Default
+            type: organization
+        related:
+            roles: []
+    -   description: ''
+        name: Wipro AWX Teams
+        natural_key:
+            name: Wipro AWX Teams
+            organization:
+                name: Wipro
+                type: organization
+            type: team
+        organization:
+            name: Wipro
+            type: organization
+        related:
+            roles: []
+
+
+...

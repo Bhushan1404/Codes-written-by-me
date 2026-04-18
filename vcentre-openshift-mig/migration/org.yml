@@ -1,0 +1,54 @@
+---
+- name: Import only Organizations, Users, and Teams into AAP
+  hosts: localhost
+  gather_facts: false
+  vars:
+    export_objects:
+      - organizations
+      - users
+      - teams
+      - roles
+    filter_user_import:
+      - admin
+
+  environment:
+    CONTROLLER_HOST: "https://172.17.3.55"
+    CONTROLLER_USERNAME: "admin"
+    CONTROLLER_PASSWORD: "Wipro@123"
+    CONTROLLER_VERIFY_SSL: False
+
+  tasks:
+    - name: Load configs from configs directory
+      ansible.builtin.include_vars:
+        dir: configs
+
+    - name: Filter out users we don't want imported
+      when: users is defined
+      set_fact:
+        users: "{{ users | rejectattr('natural_key.username', 'equalto', item) | list }}"
+      loop: "{{ filter_user_import }}"
+
+    - name: Add organizations
+      when: item == "organizations"
+      ansible.builtin.include_role:
+        name: organizations
+      loop: "{{ export_objects }}"
+
+    - name: Add users
+      when: item == "users"
+      ansible.builtin.include_role:
+        name: users
+      loop: "{{ export_objects }}"
+
+    - name: Add teams
+      when: item == "teams"
+      ansible.builtin.include_role:
+        name: teams
+      loop: "{{ export_objects }}"
+
+    - name: Add teams
+      when: item == "roles"
+      ansible.builtin.include_role:
+        name: roles
+      loop: "{{ export_objects }}"
+

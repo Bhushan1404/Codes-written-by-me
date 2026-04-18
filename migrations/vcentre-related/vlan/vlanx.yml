@@ -1,0 +1,99 @@
+---
+ - name: Migrating Inventory Hosts from Vcentre to Openshift
+   hosts: localhost
+   gather_facts: false
+   collections:
+     - vmware.vmware_rest
+   vars_files:
+        - vault.yml
+   tasks:
+     - name: Build a list of all the folders
+       vmware.vmware_rest.vcenter_folder_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+       register: all_folders
+     - name: Filter VM folders
+       ansible.builtin.set_fact:
+         vm_folders: "{{ all_folders.value | selectattr('type', 'equalto',
+           'VIRTUAL_MACHINE') | list }}"
+     - name: Check each VM folder for VMs
+       vmware.vmware_rest.vcenter_vm_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+         folders: "{{ item.folder }}"
+       register: vm_folders_with_vms
+       loop: "{{ vm_folders }}"
+     - name: Build list of all VMs in vCenter
+       set_fact:
+         all_vms_list: "{{ vm_folders_with_vms.results | map(attribute='value') | flatten }}"
+     - name: Get NICs for all VMs
+       vmware.vmware_rest.vcenter_vm_hardware_ethernet_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+         vm: "{{ item.vm }}"
+       loop: "{{ all_vms_list }}"
+       register: vm_nics_all
+       ignore_errors: yes
+     - name: Filter successful NIC info results
+       set_fact:
+         successful_vm_nics: "{{ vm_nics_all.results | selectattr('failed', 'ne', true) | selectattr('value', 'defined') | list }}"
+     - debug: 
+         var: successful_vm_nics
+     - name: Get detailed NIC info for each NIC
+       vmware.vmware_rest.vcenter_vm_hardware_ethernet_info:
+         vcenter_hostname: "{{ vcenter_hostname }}"
+         vcenter_username: "{{ vcenter_username }}"
+         vcenter_password: "{{ vcenter_password }}"
+         vcenter_validate_certs: no
+         vm: "{{ item.0.item.vm }}"
+         nic: "{{ item.1.nic }}"
+       loop: "{{ successful_vm_nics | subelements('value') }}"
+       register: detailed_nic_info_all
+       ignore_errors: yes
+     - name: Initialize vm_nic_info_list
+       set_fact:
+          vm_nic_info_list: []
+     - name: Collect simplified VM NIC info messages
+       set_fact:
+          vm_nic_info_list: "{{ vm_nic_info_list | default([]) + [ 'VM Name: ' ~ item.item.0.item.name ~
+                                                                 ', VM ID: ' ~ item.item.0.item.vm ~
+                                                                 ', VLAN: ' ~ item.value.backing.network ] }}"
+       loop: "{{ detailed_nic_info_all.results }}"
+       when:
+         - item.value is defined
+         - item.value.backing is defined 
+         - item.value.backing.network is defined
+     - name: Gather full VM info using community.vmware module
+       community.vmware.vmware_vm_info:
+         hostname: "{{ vcenter_hostname }}"
+         username: "{{ vcenter_username }}"
+         password: "{{ vcenter_password }}"
+         validate_certs: no
+         vm_type: vm
+       delegate_to: localhost
+       register: vm_info_all
+
+     - name: Build structured VM info
+       set_fact:
+         formatted_vms: "{{ formatted_vms | default([]) + [ {
+           'vm_name': item.guest_name,
+           'ip_addr': item.ip_address | default('N/A'),
+           'os': item.guest_fullname | default('N/A'),
+           'datacenter': item.datacenter | default('N/A'),
+           'storage': item.datastore_url | map(attribute='name') | list,
+           'vm_moid': item.moid | default('N/A'),
+           'vm_esxi_hostname': item.esxi_hostname |default('N/A'),
+           'vm_power_status': item.power_state |default('N/A'),
+           'vlan_id': (vm_nic_info_list | select('search', item.guest_name) | list | first | regex_search('VLAN[: ]+(.+)$')) if (vm_nic_info_list | select('search', item.guest_name) | list | length > 0) else 'N/A'
+    }] }}"
+       loop: "{{ vm_info_all.virtual_machines }}"
+       loop_control:
+         label: "{{ item.guest_name }}"
+     - debug: 
+         var: formatted_vms

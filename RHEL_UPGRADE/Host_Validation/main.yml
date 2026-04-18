@@ -1,0 +1,83 @@
+---
+- name: Play to Create a dynamic inventory
+  hosts: localhost
+  tasks:
+    - name: Capture the details if any failed task while generating the in memory inventory
+      block:
+        - name: Block to create dynamic inventory
+          block:
+            - name: File state check
+              ansible.builtin.stat:
+                path: "{{ playbook_dir }}/list_servers.txt"
+              register: filecheck
+
+            - name: Get the server list
+              ansible.builtin.command: |
+                cat "{{ playbook_dir }}"/list_servers.txt
+              register: list
+              when: filecheck.stat.exists
+
+            - name: Add the hosts into inventory group
+              when: filecheck.stat.exists
+              ansible.builtin.add_host:
+                host: "{{ item }}"
+                ansible_user: root
+                ansible_password: "Wipro@123"
+                group: target_node
+              with_lines: cat "{{ playbook_dir }}"/list_servers.txt
+      rescue:
+        - name: ServiceTheater failure update
+          ansible.builtin.debug:
+            msg:
+              - "target_host          : {{ inventory_hostname | default() }}"
+              - "task_name            : {{ ansible_failed_task['name'] }}"
+              - "status_msg           : {{ ansible_failed_result['msg'] }}"
+              - "status               : Failed "
+              - "execution_date_time  : {{ ansible_date_time['iso8601'] }}"
+
+        - name: Failed the playbook execution if main block having any failed tasks
+          ansible.builtin.fail:
+            msg: "Error occurred while generating the in memory inventory"
+
+- name: Play to validate RHEL version and IP and hostname of the target server
+  hosts: target_node
+  tasks:
+    # Hostname validation section
+    - name: Block for host validation
+      block:
+        # Host OS validation section
+        - name: Display the host OS distribution detail
+          ansible.builtin.debug:
+            msg:
+              - "Ansible facts OS: {{ ansible_distribution | default() }} {{ ansible_distribution_major_version | default() }}"
+
+        - name: Fail the play when there is a mismatch in the OS distribution
+          ansible.builtin.fail:
+            msg: "Hostname is {{ ansible_distribution | default() }} {{ ansible_distribution_version | default() }} and not a RHEL 7 machine, hence stopping further execution"
+          when: ansible_distribution != "RedHat" or ansible_distribution_major_version != "7"
+
+        - name: ServiceTheater success update host OS distribution validation
+          ansible.builtin.debug:
+            msg:
+              - "target_host: {{ ansible_hostname | default() | default() }}"
+              - "task_name: Host validation task"
+              - "status_msg: The host name {{ orginal_hostname | default() }} is a {{ ansible_distribution | default() }} {{ ansible_distribution_version | default() }} machine"
+              - "status: Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+          when: ansible_distribution == "RedHat"
+      rescue:
+        - name: ServiceTheater failure update
+          ansible.builtin.debug:
+            msg:
+              - "target_host      : {{ ansible_hostname | default() | default() }}"
+              - "task_name        : {{ ansible_failed_task['name'] }}"
+              - "status_msg       : {{ ansible_failed_result['msg'] }}"
+              - "status           : Failed"
+              - "execution_date_time : {{ ansible_date_time['iso8601'] }}"
+
+        - name: Failed the playbook when there is some error in the main block
+          ansible.builtin.fail:
+            msg: "Failed - Please check above logs for details"
+
+        - name: End further executions
+          ansible.builtin.meta: end_host

@@ -1,0 +1,48 @@
+---
+- name: Import only organizations to AAP/Controller
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    export_objects:
+      - organizations
+
+    environment:
+      CONTROLLER_HOST: "https://172.17.3.55"
+      CONTROLLER_USERNAME: "admin"
+      CONTROLLER_PASSWORD: "Wipro@123"
+      CONTROLLER_VERIFY_SSL: False
+
+  tasks:
+    - name: Fix organizations by removing empty EE entries
+      when: item == "organizations"
+      ansible.builtin.replace:
+        path: "{{ playbook_dir }}/configs/organizations.yml"
+        regexp: ' +execution_environments: \[\]'
+        replace: ''
+      loop: "{{ export_objects }}"
+
+    - name: Fix organizations by removing null default environment
+      when: item == "organizations"
+      ansible.builtin.replace:
+        path: "{{ playbook_dir }}/configs/organizations.yml"
+        regexp: ' +default_environment: null'
+        replace: ''
+      loop: "{{ export_objects }}"
+
+    - name: Include vars from config folder
+      ansible.builtin.include_vars:
+        dir: configs
+
+    # Import organizations using the 'organizations' role (must be present in your roles path)
+    - name: block and rescue for multiple attempts
+      block:
+       - name: Add organizations
+         when: item == "organizations"
+         ansible.builtin.include_role:
+           name: organizations
+         loop: "{{ export_objects }}"
+      rescue:
+        - name: Add organizations
+          ansible.builtin.include_role:
+            name: organizations

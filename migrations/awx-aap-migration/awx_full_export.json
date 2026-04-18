@@ -1,0 +1,2304 @@
+{
+    "applications": [
+        {
+            "authorization_grant_type": "password",
+            "client_type": "public",
+            "description": "",
+            "name": "APP",
+            "natural_key": {
+                "name": "APP",
+                "organization": 3,
+                "type": "o_auth2_application"
+            },
+            "organization": {
+                "name": "AWX",
+                "type": "organization"
+            },
+            "redirect_uris": "",
+            "skip_authorization": false
+        },
+        {
+            "authorization_grant_type": "authorization-code",
+            "client_type": "public",
+            "description": "",
+            "name": "AWX Hosted APPLICATIONS",
+            "natural_key": {
+                "name": "AWX Hosted APPLICATIONS",
+                "organization": 8,
+                "type": "o_auth2_application"
+            },
+            "organization": {
+                "name": "BhushanORG",
+                "type": "organization"
+            },
+            "redirect_uris": "https://xyz.com",
+            "skip_authorization": false
+        },
+        {
+            "authorization_grant_type": "password",
+            "client_type": "confidential",
+            "description": "",
+            "name": "AWX Test 1",
+            "natural_key": {
+                "name": "AWX Test 1",
+                "organization": 4,
+                "type": "o_auth2_application"
+            },
+            "organization": {
+                "name": "TestOrg",
+                "type": "organization"
+            },
+            "redirect_uris": "",
+            "skip_authorization": false
+        }
+    ],
+    "credential_types": [
+        {
+            "description": "Testing AWX To aap",
+            "injectors": {},
+            "inputs": {},
+            "kind": "cloud",
+            "name": "AWX TO AAP Migration Creds",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "AWX TO AAP Migration Creds",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "awx",
+            "injectors": {},
+            "inputs": {},
+            "kind": "cloud",
+            "name": "AWX To AAP",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "AWX To AAP",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {},
+            "kind": "cloud",
+            "name": "AWX testing",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "AWX testing",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "id": "username",
+                        "label": "Access Key",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Secret Key",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "Security Token Service (STS) is a web service that enables you to request temporary, limited-privilege credentials for AWS Identity and Access Management (IAM) users.",
+                        "id": "security_token",
+                        "label": "STS Token",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "username",
+                    "password"
+                ]
+            },
+            "kind": "cloud",
+            "name": "Amazon Web Services",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "Amazon Web Services",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {
+                "env": {
+                    "TOWER_HOST": "{{host}}",
+                    "TOWER_OAUTH_TOKEN": "{{oauth_token}}",
+                    "TOWER_PASSWORD": "{{password}}",
+                    "TOWER_USERNAME": "{{username}}",
+                    "TOWER_VERIFY_SSL": "{{verify_ssl}}"
+                }
+            },
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "The Ansible Tower base URL to authenticate with.",
+                        "id": "host",
+                        "label": "Ansible Tower Hostname",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The Ansible Tower user to authenticate as.This should not be set if an OAuth token is being used.",
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Password",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "An OAuth token to use to authenticate to Tower with.This should not be set if username/password are being used.",
+                        "id": "oauth_token",
+                        "label": "OAuth Token",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "verify_ssl",
+                        "label": "Verify SSL",
+                        "secret": false,
+                        "type": "boolean"
+                    }
+                ],
+                "required": [
+                    "host"
+                ]
+            },
+            "kind": "cloud",
+            "name": "Ansible Tower",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "Ansible Tower",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "The email address assigned to the Google Compute Engine service account.",
+                        "id": "username",
+                        "label": "Service Account Email Address",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The Project ID is the GCE assigned identification. It is often constructed as three words or two words followed by a three-digit number. Examples: project-id-000 and another-project-id",
+                        "id": "project",
+                        "label": "Project",
+                        "type": "string"
+                    },
+                    {
+                        "format": "ssh_private_key",
+                        "help_text": "Paste the contents of the PEM file associated with the service account email.",
+                        "id": "ssh_key_data",
+                        "label": "RSA Private Key",
+                        "multiline": true,
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "username",
+                    "ssh_key_data"
+                ]
+            },
+            "kind": "cloud",
+            "name": "Google Compute Engine",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "Google Compute Engine",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "Subscription ID is an Azure construct, which is mapped to a username.",
+                        "id": "subscription",
+                        "label": "Subscription ID",
+                        "type": "string"
+                    },
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Password",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "client",
+                        "label": "Client ID",
+                        "type": "string"
+                    },
+                    {
+                        "id": "secret",
+                        "label": "Client Secret",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "tenant",
+                        "label": "Tenant ID",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "Environment variable AZURE_CLOUD_ENVIRONMENT when using Azure GovCloud or Azure stack.",
+                        "id": "cloud_environment",
+                        "label": "Azure Cloud Environment",
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "subscription"
+                ]
+            },
+            "kind": "cloud",
+            "name": "Microsoft Azure Resource Manager",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "Microsoft Azure Resource Manager",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Password (API Key)",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The host to authenticate with.  For example, https://openstack.business.com/v2.0/",
+                        "id": "host",
+                        "label": "Host (Authentication URL)",
+                        "type": "string"
+                    },
+                    {
+                        "id": "project",
+                        "label": "Project (Tenant Name)",
+                        "type": "string"
+                    },
+                    {
+                        "id": "project_domain_name",
+                        "label": "Project (Domain Name)",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "OpenStack domains define administrative boundaries. It is only needed for Keystone v3 authentication URLs. Refer to Ansible Tower documentation for common scenarios.",
+                        "id": "domain",
+                        "label": "Domain Name",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "For some cloud providers, like OVH, region must be specified",
+                        "id": "region",
+                        "label": "Region Name",
+                        "type": "string"
+                    },
+                    {
+                        "default": true,
+                        "id": "verify_ssl",
+                        "label": "Verify SSL",
+                        "type": "boolean"
+                    }
+                ],
+                "required": [
+                    "username",
+                    "password",
+                    "host",
+                    "project"
+                ]
+            },
+            "kind": "cloud",
+            "name": "OpenStack",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "OpenStack",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "Enter the URL that corresponds to your Red Hat Satellite 6 server. For example, https://satellite.example.org",
+                        "id": "host",
+                        "label": "Satellite 6 URL",
+                        "type": "string"
+                    },
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Password",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "host",
+                    "username",
+                    "password"
+                ]
+            },
+            "kind": "cloud",
+            "name": "Red Hat Satellite 6",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "Red Hat Satellite 6",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {
+                "env": {
+                    "OVIRT_INI_PATH": "{{tower.filename}}",
+                    "OVIRT_PASSWORD": "{{password}}",
+                    "OVIRT_URL": "{{host}}",
+                    "OVIRT_USERNAME": "{{username}}"
+                },
+                "file": {
+                    "template": "[ovirt]\novirt_url={{host}}\novirt_username={{username}}\novirt_password={{password}}\n{% if ca_file %}ovirt_ca_file={{ca_file}}{% endif %}"
+                }
+            },
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "The host to authenticate with.",
+                        "id": "host",
+                        "label": "Host (Authentication URL)",
+                        "type": "string"
+                    },
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Password",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "Absolute file path to the CA file to use (optional)",
+                        "id": "ca_file",
+                        "label": "CA File",
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "host",
+                    "username",
+                    "password"
+                ]
+            },
+            "kind": "cloud",
+            "name": "Red Hat Virtualization",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "Red Hat Virtualization",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "Enter the hostname or IP address that corresponds to your VMware vCenter.",
+                        "id": "host",
+                        "label": "VCenter Host",
+                        "type": "string"
+                    },
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Password",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "host",
+                    "username",
+                    "password"
+                ]
+            },
+            "kind": "cloud",
+            "name": "VMware vCenter",
+            "natural_key": {
+                "kind": "cloud",
+                "name": "VMware vCenter",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "format": "url",
+                        "id": "url",
+                        "label": "CyberArk AIM URL",
+                        "type": "string"
+                    },
+                    {
+                        "id": "app_id",
+                        "label": "Application ID",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "client_key",
+                        "label": "Client Key",
+                        "multiline": true,
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "client_cert",
+                        "label": "Client Certificate",
+                        "multiline": true,
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "default": true,
+                        "id": "verify",
+                        "label": "Verify SSL Certificates",
+                        "type": "boolean"
+                    }
+                ],
+                "metadata": [
+                    {
+                        "help_text": "Lookup query for the object. Ex: Safe=TestSafe;Object=testAccountName123",
+                        "id": "object_query",
+                        "label": "Object Query",
+                        "type": "string"
+                    },
+                    {
+                        "choices": [
+                            "Exact",
+                            "Regexp"
+                        ],
+                        "default": "Exact",
+                        "id": "object_query_format",
+                        "label": "Object Query Format",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "Object request reason. This is only needed if it is required by the object's policy.",
+                        "id": "reason",
+                        "label": "Reason",
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "url",
+                    "app_id",
+                    "object_query"
+                ]
+            },
+            "kind": "external",
+            "name": "CyberArk AIM Central Credential Provider Lookup",
+            "natural_key": {
+                "kind": "external",
+                "name": "CyberArk AIM Central Credential Provider Lookup",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "format": "url",
+                        "id": "url",
+                        "label": "Conjur URL",
+                        "type": "string"
+                    },
+                    {
+                        "id": "api_key",
+                        "label": "API Key",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "account",
+                        "label": "Account",
+                        "type": "string"
+                    },
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "cacert",
+                        "label": "Public Key Certificate",
+                        "multiline": true,
+                        "type": "string"
+                    }
+                ],
+                "metadata": [
+                    {
+                        "help_text": "The identifier for the secret e.g., /some/identifier",
+                        "id": "secret_path",
+                        "label": "Secret Identifier",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "Used to specify a specific secret version (if left empty, the latest version will be used).",
+                        "id": "secret_version",
+                        "label": "Secret Version",
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "url",
+                    "api_key",
+                    "account",
+                    "username"
+                ]
+            },
+            "kind": "external",
+            "name": "CyberArk Conjur Secret Lookup",
+            "natural_key": {
+                "kind": "external",
+                "name": "CyberArk Conjur Secret Lookup",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "format": "url",
+                        "help_text": "The URL to the HashiCorp Vault",
+                        "id": "url",
+                        "label": "Server URL",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The access token used to authenticate to the Vault server",
+                        "id": "token",
+                        "label": "Token",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The CA certificate used to verify the SSL certificate of the Vault server",
+                        "id": "cacert",
+                        "label": "CA Certificate",
+                        "multiline": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The Role ID for AppRole Authentication",
+                        "id": "role_id",
+                        "label": "AppRole role_id",
+                        "multiline": false,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The Secret ID for AppRole Authentication",
+                        "id": "secret_id",
+                        "label": "AppRole secret_id",
+                        "multiline": false,
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "default": "approle",
+                        "help_text": "The AppRole Authentication path to use if one isn't provided in the metadata when linking to an input field. Defaults to 'approle'",
+                        "id": "default_auth_path",
+                        "label": "Path to Approle Auth",
+                        "multiline": false,
+                        "type": "string"
+                    },
+                    {
+                        "choices": [
+                            "v1",
+                            "v2"
+                        ],
+                        "default": "v1",
+                        "help_text": "API v1 is for static key/value lookups.  API v2 is for versioned key/value lookups.",
+                        "id": "api_version",
+                        "label": "API Version"
+                    }
+                ],
+                "metadata": [
+                    {
+                        "help_text": "The name of the kv secret backend (if left empty, the first segment of the secret path will be used).",
+                        "id": "secret_backend",
+                        "label": "Name of Secret Backend",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The path to the secret stored in the secret backend e.g, /some/secret/",
+                        "id": "secret_path",
+                        "label": "Path to Secret",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The path where the Authentication method is mounted e.g, approle",
+                        "id": "auth_path",
+                        "label": "Path to Auth",
+                        "multiline": false,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The name of the key to look up in the secret.",
+                        "id": "secret_key",
+                        "label": "Key Name",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "Used to specify a specific secret version (if left empty, the latest version will be used).",
+                        "id": "secret_version",
+                        "label": "Secret Version (v2 only)",
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "url",
+                    "secret_path",
+                    "api_version",
+                    "secret_key"
+                ]
+            },
+            "kind": "external",
+            "name": "HashiCorp Vault Secret Lookup",
+            "natural_key": {
+                "kind": "external",
+                "name": "HashiCorp Vault Secret Lookup",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "format": "url",
+                        "help_text": "The URL to the HashiCorp Vault",
+                        "id": "url",
+                        "label": "Server URL",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The access token used to authenticate to the Vault server",
+                        "id": "token",
+                        "label": "Token",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The CA certificate used to verify the SSL certificate of the Vault server",
+                        "id": "cacert",
+                        "label": "CA Certificate",
+                        "multiline": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The Role ID for AppRole Authentication",
+                        "id": "role_id",
+                        "label": "AppRole role_id",
+                        "multiline": false,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The Secret ID for AppRole Authentication",
+                        "id": "secret_id",
+                        "label": "AppRole secret_id",
+                        "multiline": false,
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "default": "approle",
+                        "help_text": "The AppRole Authentication path to use if one isn't provided in the metadata when linking to an input field. Defaults to 'approle'",
+                        "id": "default_auth_path",
+                        "label": "Path to Approle Auth",
+                        "multiline": false,
+                        "type": "string"
+                    }
+                ],
+                "metadata": [
+                    {
+                        "id": "public_key",
+                        "label": "Unsigned Public Key",
+                        "multiline": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The path to the secret stored in the secret backend e.g, /some/secret/",
+                        "id": "secret_path",
+                        "label": "Path to Secret",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The path where the Authentication method is mounted e.g, approle",
+                        "id": "auth_path",
+                        "label": "Path to Auth",
+                        "multiline": false,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The name of the role used to sign.",
+                        "id": "role",
+                        "label": "Role Name",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "Valid principals (either usernames or hostnames) that the certificate should be signed for.",
+                        "id": "valid_principals",
+                        "label": "Valid Principals",
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "url",
+                    "secret_path",
+                    "public_key",
+                    "role"
+                ]
+            },
+            "kind": "external",
+            "name": "HashiCorp Vault Signed SSH",
+            "natural_key": {
+                "kind": "external",
+                "name": "HashiCorp Vault Signed SSH",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "format": "url",
+                        "id": "url",
+                        "label": "Vault URL (DNS Name)",
+                        "type": "string"
+                    },
+                    {
+                        "id": "client",
+                        "label": "Client ID",
+                        "type": "string"
+                    },
+                    {
+                        "id": "secret",
+                        "label": "Client Secret",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "tenant",
+                        "label": "Tenant ID",
+                        "type": "string"
+                    },
+                    {
+                        "choices": [
+                            "AzureCloud",
+                            "AzureGermanCloud",
+                            "AzureChinaCloud",
+                            "AzureUSGovernment"
+                        ],
+                        "default": "AzureCloud",
+                        "help_text": "Specify which azure cloud environment to use.",
+                        "id": "cloud_name",
+                        "label": "Cloud Environment"
+                    }
+                ],
+                "metadata": [
+                    {
+                        "help_text": "The name of the secret to look up.",
+                        "id": "secret_field",
+                        "label": "Secret Name",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "Used to specify a specific secret version (if left empty, the latest version will be used).",
+                        "id": "secret_version",
+                        "label": "Secret Version",
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "url",
+                    "client",
+                    "secret",
+                    "tenant",
+                    "secret_field"
+                ]
+            },
+            "kind": "external",
+            "name": "Microsoft Azure Key Vault",
+            "natural_key": {
+                "kind": "external",
+                "name": "Microsoft Azure Key Vault",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "The URL of the Galaxy instance to connect to.",
+                        "id": "url",
+                        "label": "Galaxy Server URL",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "The URL of a Keycloak server token_endpoint, if using SSO auth.",
+                        "id": "auth_url",
+                        "label": "Auth Server URL",
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "A token to use for authentication against the Galaxy instance.",
+                        "id": "token",
+                        "label": "API Token",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "url"
+                ]
+            },
+            "kind": "galaxy",
+            "name": "Ansible Galaxy/Automation Hub API Token",
+            "natural_key": {
+                "kind": "galaxy",
+                "name": "Ansible Galaxy/Automation Hub API Token",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {
+                "extra_vars": {
+                    "scm_password": "{{password}}",
+                    "scm_username": "{{username}}"
+                }
+            },
+            "inputs": {
+                "fields": [
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Password",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "username",
+                    "password"
+                ]
+            },
+            "kind": "insights",
+            "name": "Insights",
+            "natural_key": {
+                "kind": "insights",
+                "name": "Insights",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "The OpenShift or Kubernetes API Endpoint to authenticate with.",
+                        "id": "host",
+                        "label": "OpenShift or Kubernetes API Endpoint",
+                        "type": "string"
+                    },
+                    {
+                        "id": "bearer_token",
+                        "label": "API authentication bearer token",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "default": true,
+                        "id": "verify_ssl",
+                        "label": "Verify SSL",
+                        "type": "boolean"
+                    },
+                    {
+                        "id": "ssl_ca_cert",
+                        "label": "Certificate Authority data",
+                        "multiline": true,
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "host",
+                    "bearer_token"
+                ]
+            },
+            "kind": "kubernetes",
+            "name": "OpenShift or Kubernetes API Bearer Token",
+            "natural_key": {
+                "kind": "kubernetes",
+                "name": "OpenShift or Kubernetes API Bearer Token",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "dependencies": {
+                    "authorize_password": [
+                        "authorize"
+                    ]
+                },
+                "fields": [
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Password",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "format": "ssh_private_key",
+                        "id": "ssh_key_data",
+                        "label": "SSH Private Key",
+                        "multiline": true,
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "ssh_key_unlock",
+                        "label": "Private Key Passphrase",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "authorize",
+                        "label": "Authorize",
+                        "type": "boolean"
+                    },
+                    {
+                        "id": "authorize_password",
+                        "label": "Authorize Password",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "username"
+                ]
+            },
+            "kind": "net",
+            "name": "Network",
+            "natural_key": {
+                "kind": "net",
+                "name": "Network",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "id": "password",
+                        "label": "Password",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "format": "ssh_private_key",
+                        "id": "ssh_key_data",
+                        "label": "SCM Private Key",
+                        "multiline": true,
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "ssh_key_unlock",
+                        "label": "Private Key Passphrase",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ]
+            },
+            "kind": "scm",
+            "name": "Source Control",
+            "natural_key": {
+                "kind": "scm",
+                "name": "Source Control",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "id": "username",
+                        "label": "Username",
+                        "type": "string"
+                    },
+                    {
+                        "ask_at_runtime": true,
+                        "id": "password",
+                        "label": "Password",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "format": "ssh_private_key",
+                        "id": "ssh_key_data",
+                        "label": "SSH Private Key",
+                        "multiline": true,
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "id": "ssh_public_key_data",
+                        "label": "Signed SSH Certificate",
+                        "multiline": true,
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "ask_at_runtime": true,
+                        "id": "ssh_key_unlock",
+                        "label": "Private Key Passphrase",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "help_text": "Specify a method for \"become\" operations. This is equivalent to specifying the --become-method Ansible parameter.",
+                        "id": "become_method",
+                        "label": "Privilege Escalation Method",
+                        "type": "string"
+                    },
+                    {
+                        "id": "become_username",
+                        "label": "Privilege Escalation Username",
+                        "type": "string"
+                    },
+                    {
+                        "ask_at_runtime": true,
+                        "id": "become_password",
+                        "label": "Privilege Escalation Password",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ]
+            },
+            "kind": "ssh",
+            "name": "Machine",
+            "natural_key": {
+                "kind": "ssh",
+                "name": "Machine",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "This token needs to come from your profile settings in GitHub",
+                        "id": "token",
+                        "label": "Token",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "token"
+                ]
+            },
+            "kind": "token",
+            "name": "GitHub Personal Access Token",
+            "natural_key": {
+                "kind": "token",
+                "name": "GitHub Personal Access Token",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "help_text": "This token needs to come from your profile settings in GitLab",
+                        "id": "token",
+                        "label": "Token",
+                        "secret": true,
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "token"
+                ]
+            },
+            "kind": "token",
+            "name": "GitLab Personal Access Token",
+            "natural_key": {
+                "kind": "token",
+                "name": "GitLab Personal Access Token",
+                "type": "credential_type"
+            }
+        },
+        {
+            "description": "",
+            "injectors": {},
+            "inputs": {
+                "fields": [
+                    {
+                        "ask_at_runtime": true,
+                        "id": "vault_password",
+                        "label": "Vault Password",
+                        "secret": true,
+                        "type": "string"
+                    },
+                    {
+                        "format": "vault_id",
+                        "help_text": "Specify an (optional) Vault ID. This is equivalent to specifying the --vault-id Ansible parameter for providing multiple Vault passwords.  Note: this feature only works in Ansible 2.4+.",
+                        "id": "vault_id",
+                        "label": "Vault Identifier",
+                        "type": "string"
+                    }
+                ],
+                "required": [
+                    "vault_password"
+                ]
+            },
+            "kind": "vault",
+            "name": "Vault",
+            "natural_key": {
+                "kind": "vault",
+                "name": "Vault",
+                "type": "credential_type"
+            }
+        }
+    ],
+    "credentials": [
+        {
+            "credential_type": {
+                "kind": "ssh",
+                "name": "Machine",
+                "type": "credential_type"
+            },
+            "description": "",
+            "inputs": {
+                "become_method": "",
+                "become_username": "",
+                "password": "$encrypted$",
+                "username": "root"
+            },
+            "name": "Bhushan AWX Inventory",
+            "natural_key": {
+                "credential_type": {
+                    "kind": "ssh",
+                    "name": "Machine",
+                    "type": "credential_type"
+                },
+                "name": "Bhushan AWX Inventory",
+                "organization": null,
+                "type": "credential"
+            },
+            "organization": null,
+            "user": {
+                "type": "user",
+                "username": "admin"
+            }
+        },
+        {
+            "credential_type": {
+                "kind": "scm",
+                "name": "Source Control",
+                "type": "credential_type"
+            },
+            "description": "",
+            "inputs": {
+                "password": "$encrypted$",
+                "username": "bhushan3806"
+            },
+            "name": "Bit Bucket Creds",
+            "natural_key": {
+                "credential_type": {
+                    "kind": "scm",
+                    "name": "Source Control",
+                    "type": "credential_type"
+                },
+                "name": "Bit Bucket Creds",
+                "organization": null,
+                "type": "credential"
+            },
+            "organization": null,
+            "user": {
+                "type": "user",
+                "username": "admin"
+            }
+        },
+        {
+            "credential_type": {
+                "kind": "ssh",
+                "name": "Machine",
+                "type": "credential_type"
+            },
+            "description": "",
+            "inputs": {
+                "become_method": "",
+                "become_username": "",
+                "password": "$encrypted$",
+                "username": "root"
+            },
+            "name": "Demo Creds",
+            "natural_key": {
+                "credential_type": {
+                    "kind": "ssh",
+                    "name": "Machine",
+                    "type": "credential_type"
+                },
+                "name": "Demo Creds",
+                "organization": null,
+                "type": "credential"
+            },
+            "organization": null,
+            "user": {
+                "type": "user",
+                "username": "admin"
+            }
+        }
+    ],
+    "inventory": [
+        {
+            "description": "",
+            "host_filter": null,
+            "insights_credential": null,
+            "kind": "",
+            "name": "Demo Inventory",
+            "natural_key": {
+                "name": "Demo Inventory",
+                "organization": {
+                    "name": "Default",
+                    "type": "organization"
+                },
+                "type": "inventory"
+            },
+            "organization": {
+                "name": "Default",
+                "type": "organization"
+            },
+            "related": {
+                "groups": [],
+                "hosts": [
+                    {
+                        "description": "",
+                        "enabled": true,
+                        "instance_id": "",
+                        "inventory": {
+                            "name": "Demo Inventory",
+                            "organization": {
+                                "name": "Default",
+                                "type": "organization"
+                            },
+                            "type": "inventory"
+                        },
+                        "name": "172.17.3.54",
+                        "natural_key": {
+                            "inventory": {
+                                "name": "Demo Inventory",
+                                "organization": {
+                                    "name": "Default",
+                                    "type": "organization"
+                                },
+                                "type": "inventory"
+                            },
+                            "name": "172.17.3.54",
+                            "type": "host"
+                        },
+                        "related": {
+                            "groups": []
+                        },
+                        "variables": "---"
+                    },
+                    {
+                        "description": "",
+                        "enabled": true,
+                        "instance_id": "",
+                        "inventory": {
+                            "name": "Demo Inventory",
+                            "organization": {
+                                "name": "Default",
+                                "type": "organization"
+                            },
+                            "type": "inventory"
+                        },
+                        "name": "172.17.3.59",
+                        "natural_key": {
+                            "inventory": {
+                                "name": "Demo Inventory",
+                                "organization": {
+                                    "name": "Default",
+                                    "type": "organization"
+                                },
+                                "type": "inventory"
+                            },
+                            "name": "172.17.3.59",
+                            "type": "host"
+                        },
+                        "related": {
+                            "groups": []
+                        },
+                        "variables": "---"
+                    }
+                ]
+            },
+            "variables": "---"
+        },
+        {
+            "description": "",
+            "host_filter": null,
+            "insights_credential": null,
+            "kind": "",
+            "name": "Test inventory",
+            "natural_key": {
+                "name": "Test inventory",
+                "organization": {
+                    "name": "Default",
+                    "type": "organization"
+                },
+                "type": "inventory"
+            },
+            "organization": {
+                "name": "Default",
+                "type": "organization"
+            },
+            "related": {
+                "groups": [],
+                "hosts": [
+                    {
+                        "description": "",
+                        "enabled": false,
+                        "instance_id": "",
+                        "inventory": {
+                            "name": "Test inventory",
+                            "organization": {
+                                "name": "Default",
+                                "type": "organization"
+                            },
+                            "type": "inventory"
+                        },
+                        "name": "172.17.3.53",
+                        "natural_key": {
+                            "inventory": {
+                                "name": "Test inventory",
+                                "organization": {
+                                    "name": "Default",
+                                    "type": "organization"
+                                },
+                                "type": "inventory"
+                            },
+                            "name": "172.17.3.53",
+                            "type": "host"
+                        },
+                        "related": {
+                            "groups": []
+                        },
+                        "variables": "---"
+                    },
+                    {
+                        "description": "",
+                        "enabled": true,
+                        "instance_id": "",
+                        "inventory": {
+                            "name": "Test inventory",
+                            "organization": {
+                                "name": "Default",
+                                "type": "organization"
+                            },
+                            "type": "inventory"
+                        },
+                        "name": "172.17.3.55",
+                        "natural_key": {
+                            "inventory": {
+                                "name": "Test inventory",
+                                "organization": {
+                                    "name": "Default",
+                                    "type": "organization"
+                                },
+                                "type": "inventory"
+                            },
+                            "name": "172.17.3.55",
+                            "type": "host"
+                        },
+                        "related": {
+                            "groups": []
+                        },
+                        "variables": "---"
+                    },
+                    {
+                        "description": "",
+                        "enabled": false,
+                        "instance_id": "",
+                        "inventory": {
+                            "name": "Test inventory",
+                            "organization": {
+                                "name": "Default",
+                                "type": "organization"
+                            },
+                            "type": "inventory"
+                        },
+                        "name": "172.17.4.56",
+                        "natural_key": {
+                            "inventory": {
+                                "name": "Test inventory",
+                                "organization": {
+                                    "name": "Default",
+                                    "type": "organization"
+                                },
+                                "type": "inventory"
+                            },
+                            "name": "172.17.4.56",
+                            "type": "host"
+                        },
+                        "related": {
+                            "groups": []
+                        },
+                        "variables": "---"
+                    }
+                ]
+            },
+            "variables": "---"
+        }
+    ],
+    "inventory_sources": [],
+    "job_templates": [
+        {
+            "allow_simultaneous": false,
+            "ask_credential_on_launch": false,
+            "ask_diff_mode_on_launch": false,
+            "ask_inventory_on_launch": false,
+            "ask_job_type_on_launch": false,
+            "ask_limit_on_launch": false,
+            "ask_scm_branch_on_launch": false,
+            "ask_skip_tags_on_launch": false,
+            "ask_tags_on_launch": false,
+            "ask_variables_on_launch": false,
+            "ask_verbosity_on_launch": false,
+            "become_enabled": false,
+            "custom_virtualenv": null,
+            "description": "",
+            "diff_mode": false,
+            "extra_vars": "---",
+            "force_handlers": false,
+            "forks": 0,
+            "host_config_key": "",
+            "inventory": {
+                "name": "Demo Inventory",
+                "organization": {
+                    "name": "Default",
+                    "type": "organization"
+                },
+                "type": "inventory"
+            },
+            "job_slice_count": 1,
+            "job_tags": "",
+            "job_type": "run",
+            "limit": "",
+            "name": "Bitbucket Test AWX Template",
+            "natural_key": {
+                "name": "Bitbucket Test AWX Template",
+                "organization": {
+                    "name": "Default",
+                    "type": "organization"
+                },
+                "type": "job_template"
+            },
+            "playbook": "test.yml",
+            "project": {
+                "name": "Bitbucket AWX Test",
+                "organization": {
+                    "name": "Default",
+                    "type": "organization"
+                },
+                "type": "project"
+            },
+            "related": {
+                "credentials": [
+                    {
+                        "credential_type": {
+                            "kind": "ssh",
+                            "name": "Machine",
+                            "type": "credential_type"
+                        },
+                        "name": "Demo Creds",
+                        "organization": null,
+                        "type": "credential"
+                    }
+                ],
+                "labels": [],
+                "notification_templates_error": [],
+                "notification_templates_started": [],
+                "notification_templates_success": [],
+                "schedules": [],
+                "survey_spec": {}
+            },
+            "scm_branch": "",
+            "skip_tags": "",
+            "start_at_task": "",
+            "survey_enabled": false,
+            "timeout": 0,
+            "use_fact_cache": false,
+            "verbosity": 0,
+            "webhook_credential": null,
+            "webhook_service": ""
+        }
+    ],
+    "notification_templates": [
+        {
+            "description": "",
+            "messages": null,
+            "name": "AWX",
+            "natural_key": {
+                "name": "AWX",
+                "organization": {
+                    "name": "BhushanORG",
+                    "type": "organization"
+                },
+                "type": "notification_template"
+            },
+            "notification_configuration": {
+                "host": "75.35.6.5",
+                "password": "",
+                "port": 21,
+                "recipients": [
+                    "testing"
+                ],
+                "sender": "xyz@wipro.com",
+                "timeout": 45,
+                "use_ssl": false,
+                "use_tls": true,
+                "username": ""
+            },
+            "notification_type": "email",
+            "organization": {
+                "name": "BhushanORG",
+                "type": "organization"
+            }
+        },
+        {
+            "description": "",
+            "messages": null,
+            "name": "AWX TO AAP MIGRATION",
+            "natural_key": {
+                "name": "AWX TO AAP MIGRATION",
+                "organization": {
+                    "name": "AWX",
+                    "type": "organization"
+                },
+                "type": "notification_template"
+            },
+            "notification_configuration": {
+                "annotation_tags": "",
+                "dashboardId": "",
+                "grafana_key": "$encrypted$",
+                "grafana_no_verify_ssl": false,
+                "grafana_url": "TEST",
+                "panelId": ""
+            },
+            "notification_type": "grafana",
+            "organization": {
+                "name": "AWX",
+                "type": "organization"
+            }
+        },
+        {
+            "description": "",
+            "messages": null,
+            "name": "AWX to AAP",
+            "natural_key": {
+                "name": "AWX to AAP",
+                "organization": {
+                    "name": "Default",
+                    "type": "organization"
+                },
+                "type": "notification_template"
+            },
+            "notification_configuration": {
+                "host": "test",
+                "password": "",
+                "port": 22,
+                "recipients": [
+                    "test"
+                ],
+                "sender": "test@xyz.com",
+                "timeout": 40,
+                "use_ssl": false,
+                "use_tls": true,
+                "username": ""
+            },
+            "notification_type": "email",
+            "organization": {
+                "name": "Default",
+                "type": "organization"
+            }
+        }
+    ],
+    "organizations": [
+        {
+            "custom_virtualenv": null,
+            "description": "",
+            "max_hosts": 0,
+            "name": "AWX",
+            "natural_key": {
+                "name": "AWX",
+                "type": "organization"
+            },
+            "related": {
+                "galaxy_credentials": [],
+                "notification_templates": [
+                    {
+                        "name": "AWX TO AAP MIGRATION",
+                        "organization": {
+                            "name": "AWX",
+                            "type": "organization"
+                        },
+                        "type": "notification_template"
+                    }
+                ],
+                "notification_templates_approvals": [],
+                "notification_templates_error": [],
+                "notification_templates_started": [],
+                "notification_templates_success": []
+            }
+        },
+        {
+            "custom_virtualenv": null,
+            "description": "",
+            "max_hosts": 0,
+            "name": "Bhushan ORG",
+            "natural_key": {
+                "name": "Bhushan ORG",
+                "type": "organization"
+            },
+            "related": {
+                "galaxy_credentials": [],
+                "notification_templates": [],
+                "notification_templates_approvals": [],
+                "notification_templates_error": [],
+                "notification_templates_started": [],
+                "notification_templates_success": []
+            }
+        },
+        {
+            "custom_virtualenv": null,
+            "description": "",
+            "max_hosts": 0,
+            "name": "BhushanORG",
+            "natural_key": {
+                "name": "BhushanORG",
+                "type": "organization"
+            },
+            "related": {
+                "galaxy_credentials": [],
+                "notification_templates": [
+                    {
+                        "name": "AWX",
+                        "organization": {
+                            "name": "BhushanORG",
+                            "type": "organization"
+                        },
+                        "type": "notification_template"
+                    }
+                ],
+                "notification_templates_approvals": [],
+                "notification_templates_error": [],
+                "notification_templates_started": [],
+                "notification_templates_success": []
+            }
+        },
+        {
+            "custom_virtualenv": null,
+            "description": "",
+            "max_hosts": 0,
+            "name": "Default",
+            "natural_key": {
+                "name": "Default",
+                "type": "organization"
+            },
+            "related": {
+                "galaxy_credentials": [],
+                "notification_templates": [
+                    {
+                        "name": "AWX to AAP",
+                        "organization": {
+                            "name": "Default",
+                            "type": "organization"
+                        },
+                        "type": "notification_template"
+                    }
+                ],
+                "notification_templates_approvals": [],
+                "notification_templates_error": [],
+                "notification_templates_started": [],
+                "notification_templates_success": []
+            }
+        },
+        {
+            "custom_virtualenv": null,
+            "description": "Test created",
+            "max_hosts": 0,
+            "name": "TestOrg",
+            "natural_key": {
+                "name": "TestOrg",
+                "type": "organization"
+            },
+            "related": {
+                "galaxy_credentials": [],
+                "notification_templates": [],
+                "notification_templates_approvals": [],
+                "notification_templates_error": [],
+                "notification_templates_started": [],
+                "notification_templates_success": []
+            }
+        },
+        {
+            "custom_virtualenv": null,
+            "description": "",
+            "max_hosts": 0,
+            "name": "Wipro",
+            "natural_key": {
+                "name": "Wipro",
+                "type": "organization"
+            },
+            "related": {
+                "galaxy_credentials": [],
+                "notification_templates": [],
+                "notification_templates_approvals": [],
+                "notification_templates_error": [],
+                "notification_templates_started": [],
+                "notification_templates_success": []
+            }
+        }
+    ],
+    "projects": [
+        {
+            "allow_override": false,
+            "credential": {
+                "credential_type": {
+                    "kind": "scm",
+                    "name": "Source Control",
+                    "type": "credential_type"
+                },
+                "name": "Bit Bucket Creds",
+                "organization": null,
+                "type": "credential"
+            },
+            "custom_virtualenv": null,
+            "description": "",
+            "local_path": "_6__bitbucket_test",
+            "name": "Bitbucket AWX Test",
+            "natural_key": {
+                "name": "Bitbucket AWX Test",
+                "organization": {
+                    "name": "Default",
+                    "type": "organization"
+                },
+                "type": "project"
+            },
+            "organization": {
+                "name": "Default",
+                "type": "organization"
+            },
+            "related": {
+                "notification_templates_error": [],
+                "notification_templates_started": [],
+                "notification_templates_success": []
+            },
+            "scm_branch": "main",
+            "scm_clean": false,
+            "scm_delete_on_update": false,
+            "scm_refspec": "",
+            "scm_type": "git",
+            "scm_update_cache_timeout": 0,
+            "scm_update_on_launch": false,
+            "scm_url": "https://bhushan_3806@bitbucket.org/bhushan3806/repository.git.git",
+            "timeout": 0
+        },
+        {
+            "allow_override": false,
+            "credential": null,
+            "custom_virtualenv": null,
+            "description": "",
+            "local_path": "bhushan",
+            "name": "Manua AWXl Project",
+            "natural_key": {
+                "name": "Manua AWXl Project",
+                "organization": {
+                    "name": "Default",
+                    "type": "organization"
+                },
+                "type": "project"
+            },
+            "organization": {
+                "name": "Default",
+                "type": "organization"
+            },
+            "related": {
+                "notification_templates_error": [],
+                "notification_templates_started": [],
+                "notification_templates_success": []
+            },
+            "scm_branch": "",
+            "scm_clean": false,
+            "scm_delete_on_update": false,
+            "scm_refspec": "",
+            "scm_type": "",
+            "scm_update_cache_timeout": 0,
+            "scm_update_on_launch": false,
+            "scm_url": "",
+            "timeout": 0
+        }
+    ],
+    "schedules": [
+        {
+            "description": "Cleans out expired browser sessions",
+            "diff_mode": null,
+            "enabled": true,
+            "extra_data": {},
+            "inventory": null,
+            "job_tags": null,
+            "job_type": null,
+            "limit": null,
+            "name": "Cleanup Expired Sessions",
+            "natural_key": {
+                "name": "Cleanup Expired Sessions",
+                "type": "schedule",
+                "unified_job_template": {
+                    "name": "Cleanup Expired Sessions",
+                    "type": "system_job_template"
+                }
+            },
+            "related": {
+                "credentials": []
+            },
+            "rrule": "DTSTART:20250812T010235Z RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=1",
+            "scm_branch": null,
+            "skip_tags": null,
+            "unified_job_template": {
+                "name": "Cleanup Expired Sessions",
+                "type": "system_job_template"
+            },
+            "verbosity": null
+        },
+        {
+            "description": "Removes expired OAuth 2 access and refresh tokens",
+            "diff_mode": null,
+            "enabled": true,
+            "extra_data": {},
+            "inventory": null,
+            "job_tags": null,
+            "job_type": null,
+            "limit": null,
+            "name": "Cleanup Expired OAuth 2 Tokens",
+            "natural_key": {
+                "name": "Cleanup Expired OAuth 2 Tokens",
+                "type": "schedule",
+                "unified_job_template": {
+                    "name": "Cleanup Expired OAuth 2 Tokens",
+                    "type": "system_job_template"
+                }
+            },
+            "related": {
+                "credentials": []
+            },
+            "rrule": "DTSTART:20250812T010235Z RRULE:FREQ=WEEKLY;INTERVAL=1;COUNT=1",
+            "scm_branch": null,
+            "skip_tags": null,
+            "unified_job_template": {
+                "name": "Cleanup Expired OAuth 2 Tokens",
+                "type": "system_job_template"
+            },
+            "verbosity": null
+        },
+        {
+            "description": "Automatically Generated Schedule",
+            "diff_mode": null,
+            "enabled": true,
+            "extra_data": {
+                "days": "355"
+            },
+            "inventory": null,
+            "job_tags": null,
+            "job_type": null,
+            "limit": null,
+            "name": "Cleanup Activity Schedule",
+            "natural_key": {
+                "name": "Cleanup Activity Schedule",
+                "type": "schedule",
+                "unified_job_template": {
+                    "name": "Cleanup Activity Stream",
+                    "type": "system_job_template"
+                }
+            },
+            "related": {
+                "credentials": []
+            },
+            "rrule": "DTSTART:20250812T010033Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=TU",
+            "scm_branch": null,
+            "skip_tags": null,
+            "unified_job_template": {
+                "name": "Cleanup Activity Stream",
+                "type": "system_job_template"
+            },
+            "verbosity": null
+        },
+        {
+            "description": "Automatically Generated Schedule",
+            "diff_mode": null,
+            "enabled": true,
+            "extra_data": {
+                "days": "120"
+            },
+            "inventory": null,
+            "job_tags": null,
+            "job_type": null,
+            "limit": null,
+            "name": "Cleanup Job Schedule",
+            "natural_key": {
+                "name": "Cleanup Job Schedule",
+                "type": "schedule",
+                "unified_job_template": {
+                    "name": "Cleanup Job Details",
+                    "type": "system_job_template"
+                }
+            },
+            "related": {
+                "credentials": []
+            },
+            "rrule": "DTSTART:20250812T010033Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=SU",
+            "scm_branch": null,
+            "skip_tags": null,
+            "unified_job_template": {
+                "name": "Cleanup Job Details",
+                "type": "system_job_template"
+            },
+            "verbosity": null
+        }
+    ],
+    "teams": [
+        {
+            "description": "",
+            "name": "Test teams",
+            "natural_key": {
+                "name": "Test teams",
+                "organization": {
+                    "name": "BhushanORG",
+                    "type": "organization"
+                },
+                "type": "team"
+            },
+            "organization": {
+                "name": "BhushanORG",
+                "type": "organization"
+            },
+            "related": {
+                "roles": [
+                    {
+                        "content_object": {
+                            "name": "Bitbucket Test AWX Template",
+                            "organization": {
+                                "name": "Default",
+                                "type": "organization"
+                            },
+                            "type": "job_template"
+                        },
+                        "name": "Admin",
+                        "type": "role"
+                    }
+                ]
+            }
+        },
+        {
+            "description": "",
+            "name": "AWX Test Teams",
+            "natural_key": {
+                "name": "AWX Test Teams",
+                "organization": {
+                    "name": "Default",
+                    "type": "organization"
+                },
+                "type": "team"
+            },
+            "organization": {
+                "name": "Default",
+                "type": "organization"
+            },
+            "related": {
+                "roles": []
+            }
+        },
+        {
+            "description": "",
+            "name": "Wipro AWX Teams",
+            "natural_key": {
+                "name": "Wipro AWX Teams",
+                "organization": {
+                    "name": "Wipro",
+                    "type": "organization"
+                },
+                "type": "team"
+            },
+            "organization": {
+                "name": "Wipro",
+                "type": "organization"
+            },
+            "related": {
+                "roles": []
+            }
+        }
+    ],
+    "users": [
+        {
+            "email": "bhushan.mane@wipro.com",
+            "first_name": "Bhushan",
+            "is_superuser": true,
+            "is_system_auditor": false,
+            "last_name": "Mane",
+            "natural_key": {
+                "type": "user",
+                "username": "Bhushan"
+            },
+            "related": {
+                "roles": [
+                    {
+                        "content_object": {
+                            "name": "Wipro",
+                            "type": "organization"
+                        },
+                        "name": "Member",
+                        "type": "role"
+                    },
+                    {
+                        "name": "System Administrator",
+                        "type": "role"
+                    }
+                ]
+            },
+            "username": "Bhushan"
+        },
+        {
+            "email": "root@localhost",
+            "first_name": "",
+            "is_superuser": true,
+            "is_system_auditor": false,
+            "last_name": "",
+            "natural_key": {
+                "type": "user",
+                "username": "admin"
+            },
+            "related": {
+                "roles": [
+                    {
+                        "content_object": {
+                            "name": "Bitbucket Test AWX Template",
+                            "organization": {
+                                "name": "Default",
+                                "type": "organization"
+                            },
+                            "type": "job_template"
+                        },
+                        "name": "Admin",
+                        "type": "role"
+                    },
+                    {
+                        "content_object": {
+                            "credential_type": {
+                                "kind": "scm",
+                                "name": "Source Control",
+                                "type": "credential_type"
+                            },
+                            "name": "Bit Bucket Creds",
+                            "organization": null,
+                            "type": "credential"
+                        },
+                        "name": "Admin",
+                        "type": "role"
+                    },
+                    {
+                        "content_object": {
+                            "credential_type": {
+                                "kind": "ssh",
+                                "name": "Machine",
+                                "type": "credential_type"
+                            },
+                            "name": "Demo Creds",
+                            "organization": null,
+                            "type": "credential"
+                        },
+                        "name": "Admin",
+                        "type": "role"
+                    },
+                    {
+                        "content_object": {
+                            "credential_type": {
+                                "kind": "ssh",
+                                "name": "Machine",
+                                "type": "credential_type"
+                            },
+                            "name": "Bhushan AWX Inventory",
+                            "organization": null,
+                            "type": "credential"
+                        },
+                        "name": "Admin",
+                        "type": "role"
+                    },
+                    {
+                        "name": "System Administrator",
+                        "type": "role"
+                    }
+                ]
+            },
+            "username": "admin"
+        },
+        {
+            "email": "awx.awx@wipro.com",
+            "first_name": "",
+            "is_superuser": false,
+            "is_system_auditor": false,
+            "last_name": "",
+            "natural_key": {
+                "type": "user",
+                "username": "awx"
+            },
+            "related": {
+                "roles": [
+                    {
+                        "content_object": {
+                            "name": "Bitbucket AWX Test",
+                            "organization": {
+                                "name": "Default",
+                                "type": "organization"
+                            },
+                            "type": "project"
+                        },
+                        "name": "Update",
+                        "type": "role"
+                    },
+                    {
+                        "content_object": {
+                            "name": "Default",
+                            "type": "organization"
+                        },
+                        "name": "Member",
+                        "type": "role"
+                    }
+                ]
+            },
+            "username": "awx"
+        },
+        {
+            "email": "awxuser@gmail.com",
+            "first_name": "awx",
+            "is_superuser": true,
+            "is_system_auditor": false,
+            "last_name": "user",
+            "natural_key": {
+                "type": "user",
+                "username": "awxuser"
+            },
+            "related": {
+                "roles": [
+                    {
+                        "content_object": {
+                            "name": "BhushanORG",
+                            "type": "organization"
+                        },
+                        "name": "Member",
+                        "type": "role"
+                    },
+                    {
+                        "name": "System Administrator",
+                        "type": "role"
+                    }
+                ]
+            },
+            "username": "awxuser"
+        }
+    ],
+    "workflow_job_templates": []
+}
