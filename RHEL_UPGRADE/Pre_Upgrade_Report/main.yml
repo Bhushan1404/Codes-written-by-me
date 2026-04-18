@@ -1,0 +1,764 @@
+# Collect server health details
+- name: "Play to Create a dynamic inventiry"
+  hosts: localhost
+  gather_facts: true
+  vars:
+    in_host_name: "{{ ipadd }}"
+    usr_hostname: "{{ hostname }}"
+    os_type_input: "{{ ostype }}"
+    os_type: "{{ os_type_input | capitalize }}"
+  vars_files:
+    - vault_test.yml
+  tasks:
+    - name: Capture the details if any failed task while generating the in memory inventory
+      block:
+        - name: Split the Host IPAdd and name
+          ansible.builtin.set_fact:
+            host_name: "{{ in_host_name.split(',') }}"
+            input_hostname: "{{ usr_hostname.split(',') }}"
+          failed_when: in_host_name is undefined and usr_hostname is undefined
+
+        - name: Map the IPAdd and host name into inventory information
+          ansible.builtin.set_fact:
+            host_info: "{{ dict(host_name | zip(input_hostname)) | dict2items(key_name='in_host_name', value_name='usr_hostname') }}"
+          failed_when: host_name is undefined and input_hostname is undefined
+
+        - name: Block to create dynamic inventory when the OS type is Windows
+          block:
+            - name: Add the hosts into inventory group if it is Windows servers
+              ansible.builtin.add_host:
+                name: "{{ item.in_host_name }}"
+                input_hostname: "{{ item.usr_hostname }}"
+                os_type: "{{ os_type | default() }}"
+                ansible_user: "{{ ansible_user | default() }}"
+                ansible_password: "{{ ansible_ssh_pass | default() }}"
+                ansible_ssh_port: 22
+                group: exec_nodes
+              loop: "{{ host_info | default('') }}"
+              when: host_info is defined
+      rescue:
+        - name: ServiceTheater failure update
+          ansible.builtin.debug:
+            msg:
+              - "target_host          : {{ inventory_hostname }}"
+              - "task_name            : {{ ansible_failed_task['name'] }}"
+              - "status_msg           : {{ ansible_failed_result['msg'] }}"
+              - "status               : failed "
+              - "execution_date_time  : {{ ansible_date_time['iso8601'] }}"
+
+        - name: Failed the playbook execution if main block having any failed taks
+          ansible.builtin.fail:
+            msg: "Error occurred while generating the in memory inventory"
+
+- name: Play to fetch configuration details on the target server
+  hosts: exec_nodes
+  gather_facts: true
+  collections:
+    - community.general
+  vars:
+    report_name: "{{ RITMNO }}_Pre_Upgrade_{{ ansible_hostname | default() }}_{{ ansible_date_time.date }}.txt"
+    sar_file: "/var/log/sa/sa{{ ansible_date_time.day }}"
+    mount_info: {}
+    bond_file: "/proc/net/bonding/bond0"
+    dns_file: "/etc/resolv.conf"
+    limit_file: "/etc/security/limits.conf"
+    user_file: "/etc/passwd"
+    nic_file: "/etc/sysconfig/network-scripts/ifcfg-*"
+    fstab_file: "/etc/fstab"
+  tasks: 
+    # Main block for the server health check
+    - name: Block to check the Linux OS Health check report
+      when: os_type == 'Linux'
+      block:
+
+        # Set_fact to determine the server type whether physical or virtual
+        - name: Set Server Type Fact
+          ansible.builtin.set_fact:
+            server_type: "{% if ansible_virtualization_type == 'VMware' %}virtual{% else %}physical{% endif %}"
+
+        - name: Block for collecting hardware details
+          block:
+            - name: Collect all file system details
+              ansible.builtin.set_fact:
+                mount_info: "{{ mount_info | combine({item.mount: {'device': item.device, 'filesystem': item.fstype, 'total_size': (item.size_total / 1024 / 1024 / 1024 ) ~ ' GB',
+                    'available_size': (item.size_available / 1024 / 1024 / 1024 ) ~ ' GB', 'used_size': ((item.size_total - item.size_available) / 1024 / 1024 / 1024 ) ~ ' GB', 
+                    'used_percentage': (((item.size_total - item.size_available) / item.size_total) * 100 ) ~ ' %'}}) }}"
+              loop: "{{ ansible_mounts | default }}"
+
+            - name: Execute the bash script to capture the HBA card details
+              ansible.builtin.shell: |
+                #!/bin/bash
+                for hba in `ls -d /sys/class/fc_host/host*`;do
+                  FC_HOST=`basename $hba`
+                  PortID=`cat $hba/port_id`
+                  wwpn=`cat $hba/port_name`
+                  state=`cat $hba/port_state`
+                  speed=`cat $hba/speed`
+                  hba=`cat $hba/symbolic_name`
+                  hba_make=`echo $hba | cut -f1 -d ' ' `
+                  hba_model=`echo $hba | cut -f2 -d ' ' `
+                  hba_fw=`echo $hba | cut -f3 -d ' ' `
+                  hba_driver=`echo $hba | cut -f4 -d ' ' `
+                  echo "$FC_HOST| $wwpn | $state| $speed | $hba_make | $hba_model | $hba_fw | $hba_driver "
+                done
+              register: hba_script_out
+              changed_when: false
+              when: "'virtual' not in server_type"
+
+            - name: Execute the commands to gather multipath report
+              ansible.builtin.shell: |
+                  if ! [ -x "$(command -v multipath)" ]; then
+                      echo 'Error: multipath is not installed.' >&2
+                    else
+                      COM_HBA="$(multipath -ll)"
+                      EXIT_CODE=$?
+                    if [ $EXIT_CODE -eq 0 ] && [ ! -z "$COM_HBA" ]; then
+                      echo "$COM_HBA"
+                      else
+                      echo "No Multipath device found"
+                    fi
+                  fi
+              args:
+                executable: /bin/bash
+              register: mpath_out
+              changed_when: false
+              when: "'virtual' not in server_type"
+
+            - name: Execute the commands to gather number of multipath device
+              ansible.builtin.shell: multipath -ll | egrep -i 'mpath*' | wc -l
+              args:
+                executable: /bin/bash
+              register: mpath_count
+              changed_when: false
+
+            - name: Get server uptime
+              ansible.builtin.shell:
+                cmd: uptime -p
+              args:
+                executable: /bin/bash
+              register: uptime_result
+              changed_when: false
+
+            - name: Get last reboot time
+              ansible.builtin.shell: who -b
+              args:
+                executable: /bin/bash
+              register: last_reboot_result
+              changed_when: false
+
+            - name: Get list of packages installed recently
+              ansible.builtin.shell:
+                cmd: rpm -qa --last | head -n 30
+              register: rece_pgk_list
+              changed_when: false
+        
+            # Collecting file system and block device status
+            - name: Check mount details
+              ansible.builtin.shell: 
+                cmd: mount -a
+              register: mount_details
+              changed_when: false
+
+            - name: Collect Free Memory Details
+              ansible.builtin.shell: free -m
+              register: mem_usage
+              changed_when: false
+
+            - name: Collect file system FSTAB entry
+              ansible.builtin.shell: cat {{ fstab_file }}
+              register: fs_tab
+              changed_when: false
+
+            - name: Collect disk attached in the server
+              ansible.builtin.shell: lsblk
+              register: sys_disks
+              changed_when: false
+        
+            - name: Collect Physical Volume details
+              ansible.builtin.shell: "pvs ; pvs --options pe_start,pv_size,pv_free,pv_used,pv_attr,pv_pe_count,pv_pe_alloc_count,dev_size"
+              register: pvs
+              changed_when: false
+
+            - name: Collect Volume Group details
+              ansible.builtin.shell: "vgs --options vg_name,vg_size,vg_free,vg_extent_size,vg_extent_count,vg_uuid"
+              register: vgs
+              changed_when: false
+
+            - name: Collect Logical Volume details
+              ansible.builtin.shell: "lvs --options lv_full_name,lv_name,vg_name,lv_size,lv_attr,lv_path,devices"
+              register: lvs
+              changed_when: false
+
+            - name: Collect Block device details
+              ansible.builtin.shell: blkid
+              register: blk_dev
+              changed_when: false
+
+            - name: Collect ethernet configuration details from config files
+              ansible.builtin.shell: cat {{ nic_file }}
+              register: eth_conf
+              changed_when: false
+
+            - name: Collect ethernet link status
+              ansible.builtin.shell: ip link show
+              register: ip_link
+              changed_when: false
+
+            - name: Collect all network devices
+              ansible.builtin.shell: ifconfig -a
+              register: all_device
+              changed_when: false
+
+            - name: Check if SAR file exists
+              ansible.builtin.stat:
+                path: "{{ bond_file }}"
+              register: file_status
+              changed_when: false
+
+            - name: Collect bonding configuration
+              ansible.builtin.shell: cat {{ bond_file }}
+              register: bond_config
+              when: file_status.stat.exists
+              changed_when: false
+              
+            - name: Collect routing details
+              ansible.builtin.shell: route -n
+              register: route_details
+              changed_when: false
+
+            - name: Collect routing device details
+              ansible.builtin.shell: ip r  l
+              register: route_dev_details
+              changed_when: false
+
+            - name: Collect DNS details
+              ansible.builtin.shell: cat {{ dns_file }}
+              register: resolv_conf
+              changed_when: false
+            
+            # Collect last 24 hrs Journal Critical/Error Alerts
+            - name: Collect Last 24hrs Journal Critical/Error Alerts
+              ansible.builtin.shell: |
+                journalctl --since "24 hours ago" -p err -n 10000 && journalctl --since "24 hours ago" -k -p err -n 10000 
+              register: journal_alert
+              changed_when: false
+            
+            # Collect last 24 hrs Critical/Error from dmesg logs
+            - name: Collect Last 24hrs errors from dmesg logs
+              ansible.builtin.shell: dmesg | awk -v d="$(date -d'24 hours ago' +'%F %T,000')" '$1" "S2>=d && /error/ || /critical'/
+              register: critical_logs
+              changed_when: false
+            
+            - name: Collect user details
+              ansible.builtin.shell: cat {{ user_file }}
+              register: user_details
+              changed_when: false
+
+            - name: Collect users limit details
+              ansible.builtin.shell: cat {{ limit_file }}
+              register: limit_details
+              changed_when: false
+
+            - name: Collect all CPU including Numa details
+              ansible.builtin.shell: lscpu
+              register: cpu_numa
+              changed_when: false
+
+
+            - name: Collect Last login details
+              ansible.builtin.shell: last && lastb && lastlog
+              register: last_login
+              changed_when: false
+              
+            - name: Create st_auto folder
+              ansible.builtin.file:
+                path: /tmp/st_auto
+                state: directory
+                mode: 755
+              
+            - name: Create system information file
+              ansible.builtin.lineinfile:
+                path: "/tmp/st_auto/{{ report_name }}"
+                create: true
+                line: |
+                  ############ Server Manufacture and Model ##########################
+                  Host Name           : {{ ansible_hostname | default('') }}
+                  Hardware Vendor     : {{ ansible_system_vendor | default('') }}
+                  Server Model        : {{ ansible_product_name | default('') }}
+                  OS                  : {{ ansible_distribution | default('') }}
+                  Major Version       : {{ ansible_distribution_major_version | default('') }}
+                  Release             : {{ ansible_distribution_release | default('') }}
+                  Version             : {{ ansible_distribution_version | default('') }}
+
+                  ############ CPU with NUMA information ##############################
+                  {% if cpu_numa.stdout_lines is defined %}
+                  {% for line in cpu_numa.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% endif %}
+
+                  ############ Memory Information #####################################
+                  {% if mem_usage.stdout_lines is defined %}
+                  {% for line in mem_usage.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% endif %}
+                  Totel Memory        : {{ ansible_memtotal_mb | default('') }} MB
+                  Free Memory         : {{ ansible_memfree_mb | default('') }} MB
+                  Total Swap          : {{ ansible_swaptotal_mb |default('') }} MB
+                  Free Swap           : {{ ansible_swapfree_mb | default('') }} MB
+
+                  ############ File System Usage  #####################################
+                  {{ mount_info | default('') | to_nice_json }}
+
+                  ############ Multipath LUNs #########################################
+                  {% if mpath_out.stdout_lines is defined %}
+                  {% for line in mpath_out.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No Multipath devices found
+                  {% endif %}
+
+                  ########### Multipath LUN Counts ####################################
+                  {% if mpath_count is defined %}
+                  {% for line in mpath_count.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No Multipath devices found
+                  {% endif %}
+
+                  ############ Disk Attached in OS #####################################
+                  {% if sys_disks.stdout_lines is defined %}
+                  {% for line in sys_disks.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No Disks found
+                  {% endif %}
+
+                  ############ HBA WWN Number ##########################################
+                  {% if hba_script_out.stdout_lines is defined %}
+                  {% for line in hba_script_out.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No HBA card found
+                  {% endif %}
+
+                  ############ PV Details #############################################
+                  {% if pvs.stdout_lines is defined %}
+                  {% for line in pvs.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No Physical Volume found
+                  {% endif %}
+
+                  ############ VG Details #############################################
+                  {% if vgs.stdout_lines is defined %}
+                  {% for line in vgs.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No Volume Group found
+                  {% endif %}
+
+                  ############ LV Details #############################################
+                  {% if lvs.stdout_lines is defined %}
+                  {% for line in lvs.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No Logical Volume found
+                  {% endif %}
+        
+                  ############ Block Device Details ###################################
+                  {% if blk_dev.stdout_lines is defined %}
+                  {% for line in blk_dev.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% endif %}
+            
+                  ############ FSTAB Entry Details ####################################
+                  {% if fs_tab.stdout_lines is defined %}
+                  {% for line in fs_tab.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% endif %}
+                
+                  ############ System Uptime and Last Reboot details ####################
+                  {% if uptime_result is defined and "up" in uptime_result.stdout and last_reboot_result is defined %}
+                  Server Uptime: {{ uptime_result.stdout }}
+                  Last Reboot Time: {{ last_reboot_result.stdout.split()[2:] }}
+                  {% else %}
+                  No system uptime and last reboot time data found. Kindly check the relevant tasks for further information.
+                  {% endif %}
+
+                  ########### Users Details ##############################################
+                  {% if user_details.stdout_lines is defined %}
+                  {% for line in user_details.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No user limit found
+                  {% endif %}
+
+                  ########### User Limits Details ########################################
+                  {% if limit_details.stdout_lines is defined %}
+                  {% for line in limit_details.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No user limit found
+                  {% endif %}
+
+                  ############ Recent patches list #######################################
+                  {% if rece_pgk_list.stdout_lines is defined %}
+                  Recently Installaed Patches List:
+                  {% for line in rece_pgk_list.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No packages found
+                  {% endif %}
+
+                  ############ Ethernet Configuration  File Details ############
+                  {% if eth_conf.stdout_lines is defined %}
+                  {% for line in eth_conf.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No network configuration files found
+                  {% endif %}
+
+                  ############ Network Link Status ############################
+                  {% if ip_link.stdout_lines is defined %}
+                  {% for line in ip_link.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No network link found
+                  {% endif %}
+
+                  ############ Bonding Configureation #########################
+                  {% if bonding_config.stdout_lines is defined %}
+                  {% for line in bonding_config.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No bonding device found
+                  {% endif %}
+
+                  ############ All Network Device #############################
+                  {% if all_device.stdout_lines is defined %}
+                  {% for line in all_device.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No network device found
+                  {% endif %}
+
+                  ########### Routing Details #################################
+                  {% if route_details.stdout_lines is defined %}
+                  {% for line in route_details.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No routing details found
+                  {% endif %}
+
+                  ########### Routing Device Details ##########################
+                  {% if route_dev_details.stdout_lines is defined %}
+                  {% for line in route_dev_details.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No routing device found
+                  {% endif %}
+
+                  ########### DNS Details ##########################
+                  {% if resolv_conf.stdout_lines is defined %}
+                  {% for line in resolv_conf.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No DNS details found
+                  {% endif %}
+
+                  ############ Journal Critical/Error Alerts ################################
+                  {% if journal_alert.stdout_lines is defined %}
+                  {% for line in journal_alert.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No Events found
+                  {% endif %}
+
+                  ############ Errors from dmesg logs #######################################
+                  {% if critical_logs.stdout_lines is defined %}
+                  {% for line in critical_logs.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No Logs found
+                  {% endif %}
+        
+                  ############ Last Login Details #######################################
+                  {% if last_login.stdout_lines is defined %}
+                  {% for line in last_login.stdout_lines %}
+                  {{ line | default() }}
+                  {% endfor %}
+                  {% else %}
+                  No last login details found
+                  {% endif %}
+
+            - name: Get network interface devices
+              ansible.builtin.command: ip a
+              register: ip_a_output
+              changed_when: false
+
+            - name: Filter network interface devices
+              set_fact:
+                filtered_interfaces: "{{ ip_a_output.stdout_lines | select('match', '^(\\d+): (eno|ens|enp|enx|eth).*') | map('regex_replace', '^(\\d+): ([^:]+):.*', '\\1 \\2') | map('regex_replace', '^\\d+ (eno|ens|enp|enx|eth)(\\d+).*', '\\1\\2') | list }}"
+              when: ip_a_output.stdout_lines is defined
+
+            - name: Gather Ethernet details
+              ansible.builtin.shell: ethtool {{ item }}
+              register: ethtool_output
+              failed_when: ethtool_output.rc != 0
+              loop: "{{ filtered_interfaces | default() }}"
+
+            - name: Print Ethernet details
+              ansible.builtin.debug:
+                var: ethtool_output
+
+            - name: Write Ethernet details to file
+              lineinfile:
+                path: "/tmp/st_auto/{{ report_name }}"
+                create: true
+                line: |
+                  ############ ETHTOOL Device Configuration Details ######################
+                  "{{ item.stdout }}"
+              loop: "{{ ethtool_output.results }}"
+              when: item is success
+
+            # The below code is for SAR report collection
+            - name: Check if SAR file exists
+              ansible.builtin.stat:
+                path: "{{ sar_file }}"
+              register: file_status
+
+            - name: Print if SAR files does not exist
+              ansible.builtin.debug:
+                msg: "SAR files are not found. Please Check SAR file {{ sar_file }} available to execute the playbook"
+              when: not file_status.stat.exists
+
+            - name: Check if sysstat service is running
+              ansible.builtin.systemd:
+                name: sysstat
+              register: service_status
+
+            - name: Print if sysstat service is not running
+              ansible.builtin.debug:
+                msg: " The sysstat sevice is not running"
+              when: service_status.status.ActiveState != 'active'
+
+            - name: Generat last 24hrs SAR Report
+              ansible.builtin.shell: |
+                #!/bin/bash
+                echo ============== CPU Usage Report Start ========== >> "/tmp/st_auto/{{ report_name }}"
+                /usr/bin/sar -u -f {{ sar_file }} >> "/tmp/st_auto/{{ report_name }}"
+                echo ============== CPU Usage Report End ============ >> "/tmp/st_auto/{{ report_name }}"
+                echo ============= Memory Usage Report Start ======== >> "/tmp/st_auto/{{ report_name }}"
+                /usr/bin/sar -r -f {{ sar_file }} >> "/tmp/st_auto/{{ report_name }}"
+                echo ============= Memory Usage Report End ========== >> "/tmp/st_auto/{{ report_name }}"
+                echo ============== Swap Usage Report Start ========= >> "/tmp/st_auto/{{ report_name }}"
+                echo ============== Swap Usage Report Start ========= >> "/tmp/st_auto/{{ report_name }}"
+                /usr/bin/sar -S -f {{ sar_file }} >> "/tmp/st_auto/{{ report_name }}"
+                echo ============== Swap Usage Report End  ========== >> "/tmp/st_auto/{{ report_name }}"
+                echo ============== Disk Usage Report Start ========= >> "/tmp/st_auto/{{ report_name }}"
+                /usr/bin/sar -d -f {{ sar_file }} >> "/tmp/st_auto/{{ report_name }}"
+                echo =============== Disk Usage Report End  ========= >> "/tmp/st_auto/{{ report_name }}"
+                echo ================== CPU Average Report =========================================== >> "/tmp/st_auto/{{ report_name }}"
+                /usr/bin/sar -u -f {{ sar_file }} | awk '/^Average:/{print $0}' >> "/tmp/st_auto/{{ report_name }}"
+                echo ================== Memory Average Report  ======================================== >> "/tmp/st_auto/{{ report_name }}"
+                /usr/bin/sar -r -f {{ sar_file }} | awk '/^Average:/{print $0}' >> "/tmp/st_auto/{{ report_name }}"
+                echo ================== Swap Average Report  ========================================== >> "/tmp/st_auto/{{ report_name }}"
+                /usr/bin/sar -S -f {{ sar_file }} | awk '/^Average:/{print $0}' >> "/tmp/st_auto/{{ report_name }}"
+                echo ================== Disk Average Report  ========================================= >> "/tmp/st_auto/{{ report_name }}"
+                /usr/bin/sar -d -f {{ sar_file }} | awk '/^Average:/{print $0}' >> "/tmp/st_auto/{{ report_name }}"
+              when: file_status.stat.exists
+
+          rescue:
+            - name: ServiceTheater failure update
+              ansible.builtin.debug:
+                msg:
+                  - "target_host          : {{ inventory_hostname }}"
+                  - "task_name            : {{ ansible_failed_task['name'] }}"
+                  - "status_msg           : {{ ansible_failed_result['msg'] }}"
+                  - "status               : failed "
+                  - "execution_date_time  : {{ ansible_date_time['iso8601'] }}"
+                  
+            - name: Failed the playbook execution if main block having any failed taks
+              ansible.builtin.fail:
+                msg: "Unexpected error during execution"
+       
+       # Check whether the reports are generated or not
+        - name: Find files
+          ansible.builtin.find:
+            paths: /tmp/st_auto/
+          register: find_files
+
+        - name: Display the files
+          ansible.builtin.debug:
+            msg: "{{ item.path }}"
+          loop: "{{ find_files.files }}"
+          loop_control:
+            label: "files"
+
+        # Report collection and push to AAP / Tower
+        - name: Block for report collection
+          when: find_files.matched > 0
+          block:
+            - name: ServiceTheater update if the report generated successfully
+              ansible.builtin.debug:
+                msg:
+                  - "target_host        : {{ inventory_hostname }}"
+                  - "task_name          : Report collection task"
+                  - "status_msg         : Report generated successfully"
+                  - "status             : Success"
+                  - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+            - name: Fetch the report from remote server and store it on localhost(AAP)
+              ansible.builtin.fetch:
+                src: "{{ item.path }}"
+                dest: /reports/
+                flat: true
+              loop: "{{ find_files.files }}"
+              loop_control:
+                label: "file"
+
+            - name: Check the local copy of the report
+              ansible.builtin.find:
+                paths: /reports
+              register: local_file_stat
+              delegate_to: localhost
+
+            - name: Print the report status on controle node
+              ansible.builtin.debug:
+                msg: "{{ item.path }}"
+              loop: "{{ local_file_stat.files }}"
+              loop_control:
+                label: "file"
+            
+            - name: Remove the source report from target directory
+              ansible.builtin.file:
+                path: "{{ item.path }}"
+                state: absent
+              when: local_file_stat.matched > 0
+              loop: "{{ find_files.files }}"
+              loop_control:
+                label: "file"
+
+          rescue:
+            - name: ServiceTheater update
+              ansible.builtin.debug:
+                msg:
+                  - "target_host        : {{ inventory_hostname }}"
+                  - "task_name          : {{ ansible_failed_task['name'] }}"
+                  - "status_msg         : {{ ansible_failed_result['msg'] }}"
+                  - "status             : Failed"
+                  - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+                  
+            - name: Failed the playbook execution if main block having any failed taks
+              ansible.builtin.fail:
+                msg: "Unexpected error during execution" 
+
+      rescue:
+        - name: ServiceTheater failure update
+          ansible.builtin.debug:
+            msg:
+              - "target_host          : {{ inventory_hostname }}"
+              - "task_name            : {{ ansible_failed_task['name'] }}"
+              - "status_msg           : {{ ansible_failed_result['msg'] }}"
+              - "status               : Failed"
+              - "execution_date_time  : {{ ansible_date_time['iso8601'] }}"
+
+        - name: Failed the playbook execution if main block having any failed taks
+          ansible.builtin.fail:
+            msg: "Unexpected error during execution"
+
+# Play (to push the files to ServiceTheater, so that it'll be attached to RITM using API framework)
+- name: Push the files to ServiceTheatres
+  hosts: localhost   
+  vars:
+    os_type_input: "{{ ostype }}"
+    os_type: "{{ os_type_input | capitalize }}"
+  tasks:
+    - name: Block for file pusing to ST server
+      when: os_type == 'Linux'
+      block:
+        # check the report status
+        - name: List the files from /reports folder
+          ansible.builtin.find:
+            paths: /reports
+            recurse: true
+          register: file_find
+          
+        # Get the ServiceTheatre machine credential from CyberArk
+        - name: Get the ServiceTheatre machine password from CyberArk vault
+          block:
+            - name: Manage the ST server action
+              delegate_to: 172.17.73.58
+              vars:
+                ansible_user: root
+                ansible_password: Wipro@123
+              block:
+                # Create a folder on ST server to store the reports 
+                - name: Create a folder on ServiceTheatre to store the reports
+                  ansible.builtin.file:
+                    path: /opt/ST_Reports
+                    state: directory
+                    mode: '0755'
+                                  
+                # Copy the report to ST server to attach into SNOW
+                - name: Copy the files to serviceTheatre
+                  ansible.builtin.copy:
+                    src: "{{ item.path }}"
+                    dest: /opt/ST_Reports
+                    mode: '0644'
+                  loop: "{{ file_find.files }}"
+                  loop_control:
+                    label: "file"
+
+            - name: Set facts for finaly attachement file name
+              ansible.builtin.set_fact:
+                attachment_file_name: "{{ file_find['files'] | map(attribute='path') | map('regex_replace','^.*/(.*)$','\\1') | list }}"
+
+            - name: Display the attachement file details to Servicetheater
+              ansible.builtin.debug:
+                msg: {"attachment_file_name":"{{ attachment_file_name | replace(', u',',') | replace('[u','') | replace('[','') | replace(']','') | replace(\"'\",'') | replace(' ','') }}"}
+
+      rescue:
+        - name: "ServiceTheater update"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : localhost (controle Machine)"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+        - name: Failed the playbook execution if main block having any failed taks
+          ansible.builtin.fail:
+            msg: "Unexpected error during execution"
+
+    - name: "ServiceTheater update to the requester if the OS tyep is not windows"
+      ansible.builtin.debug:
+        msg:
+          - "target_host          : Localhost (Control Machine)"
+          - "task_name            : Validate the OS type"
+          - "status_msg           : Please check the selected os type, since this frame will work for only Windows servers. Kindly place the new order with proper OS type"
+          - "execution_date_time  : {{ ansible_date_time['iso8601'] }}"
+      when: os_type != "Linux"

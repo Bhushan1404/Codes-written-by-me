@@ -1,0 +1,290 @@
+---
+- name: Create Snapshot for VCenter VM
+  hosts: localhost
+  vars:
+    vcenter_username: "{{ vc_username }}"
+    vcenter_password: "{{ vc_password }}"
+    snapshot_created: false
+    datastore_mismatch: false
+    status_code: "TechnicalFailed"
+  tasks:
+    - name: Main block to run
+      block:
+      - name: Setting execution IST date time
+        ansible.builtin.set_fact:
+          ist_time: "{{ lookup('pipe','TZ=Asia/Kolkata date \"+%Y-%m-%dT%H:%M:%SZ\"') }}"
+        
+      # Validate the VM presense in vCenter with lower case
+      - name: Gather VM info - Lowercase
+        community.vmware.vmware_vm_info:
+          hostname: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username | default() }}"
+          password: "{{ vcenter_password | default()}}"
+          validate_certs: no
+          vm_name: '{{ hostname | lower }}'
+        register: vm_info_lower
+        failed_when: false
+        
+      # Validate the VM presense in vCenter with lower case
+      - name: Gather VM info - Uppercase
+        community.vmware.vmware_vm_info:
+          hostname: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username | default() }}"
+          password: "{{ vcenter_password | default()}}"
+          validate_certs: no
+          vm_name: '{{ hostname | upper }}'
+        register: vm_info_upper
+        failed_when: false
+
+      # Validate the VM presense in vCenter with original case
+      - name: Gather VM info - Original case
+        community.vmware.vmware_vm_info:
+          hostname: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username | default() }}"
+          password: "{{ vcenter_password | default()}}"
+          validate_certs: no
+          vm_name: '{{ hostname }}'
+        register: vm_info_original
+        failed_when: false
+
+      # Set fact for VM exist status
+      - name: Set facts to check the VM exist or not
+        ansible.builtin.set_fact:
+          vm_exists: >-
+            {% if vm_info_lower.virtual_machines is defined or 
+                  vm_info_upper.virtual_machines is defined or 
+                  vm_info_original.virtual_machines is defined %}true{% else %}false{% endif %}
+
+      - name: Setting status code as FunctionalFailed - when VM not found in VCenter
+        ansible.builtin.set_fact:
+          status_code: "FunctionalFailed"
+        when: vm_exists | bool == false
+
+      # Update ServiceTheater when the input server is physical or not present in the current vCenter
+      - name: Validation - Fail when VM not found in VCenter
+        ansible.builtin.fail:
+          msg: "Failed to find virtual machine {{ hostname }} on VCenter"
+        when: vm_exists | bool == false
+
+      - name: Store VM IP, UUID, Datacenter and new snapshot name in variable
+        ansible.builtin.set_fact:
+          vm_ip: "{% if vm_info_lower.virtual_machines is defined %}{{ vm_info_lower.virtual_machines.0.ip_address }}{% elif vm_info_upper.virtual_machines is defined %}{{ vm_info_upper.virtual_machines.0.ip_address }}{% else %}{{ vm_info_original.virtual_machines.0.ip_address }}{% endif %}"
+          datacenter_name: "{% if vm_info_lower.virtual_machines is defined %}{{ vm_info_lower.virtual_machines.0.datacenter }}{% elif vm_info_upper.virtual_machines is defined %}{{ vm_info_upper.virtual_machines.0.datacenter }}{% else %}{{ vm_info_original.virtual_machines.0.datacenter }}{% endif %}"
+          vm_uuid: "{% if vm_info_lower.virtual_machines is defined %}{{ vm_info_lower.virtual_machines.0.uuid }}{% elif vm_info_upper.virtual_machines is defined %}{{ vm_info_upper.virtual_machines.0.uuid }}{% else %}{{ vm_info_original.virtual_machines.0.uuid }}{% endif %}"
+          snap_name: "{{RITMNO}}-{{snap_name_before_major}}"
+
+      - name: Setting status code as FunctionalFailed - when VM not found in VCenter
+        ansible.builtin.set_fact:
+          status_code: "FunctionalFailed"
+        when: vm_uuid is not defined
+
+      - name: Validation - Fail when VM not found in VCenter
+        ansible.builtin.fail:
+          msg: "{{ hostname }} VM is not available in the Vcenter, hence stopping further executions"
+        when: vm_uuid is not defined
+
+      - name: Setting status code as FunctionalFailed - VM IP does not match with user input IP
+        ansible.builtin.set_fact:
+          status_code: "FunctionalFailed"
+        when: vm_ip != ipadd
+
+      - name: Validation - Fail when VM IP does not match with user input IP
+        ansible.builtin.fail:
+          msg: "{{ ipadd }} is not matching with VM's IP {{ vm_ip | default() }}, hence stopping further executions"
+        when: vm_ip != ipadd
+
+      - name: Setting status code as FunctionalFailed - when VM dataCenter name does not match with user input datacenter
+        ansible.builtin.set_fact:
+          status_code: "FunctionalFailed"
+        when: datacenter_name != input_datacenter
+
+      - name: Validation - Fail when VM dataCenter name does not match with user input datacenter
+        ansible.builtin.fail:
+          msg: "{{ input_datacenter }} is not matching with VM's DataCenter {{ datacenter_name | default() }}"
+        when: datacenter_name != input_datacenter
+
+      - name: Gather Memory info of VM
+        community.vmware.vmware_guest_info:
+          hostname: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username | default() }}"
+          password: "{{ vcenter_password | default()}}"
+          validate_certs: no
+          datacenter: "{{ datacenter_name | default() }}"
+          uuid: "{{ vm_uuid | default() }}"
+          schema: "vsphere"
+          properties: ["config.hardware.memoryMB"]
+        register: vm_info
+
+      - name: Store VM memory size in variable
+        ansible.builtin.set_fact:
+          vm_mem: "{{ vm_info.instance.config.hardware.memoryMB }}"
+
+      - name: Gather Disk info of VM
+        community.vmware.vmware_guest_disk_info:
+          hostname: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username | default() }}"
+          password: "{{ vcenter_password | default()}}"
+          datacenter: "{{ datacenter_name | default() }}"
+          uuid: "{{ vm_uuid | default() }}"
+          validate_certs: False
+        register: disk_fact
+
+      - name: Filter VM Disks with Datastores
+        ansible.builtin.set_fact:
+          valid_disks: "{{ disk_fact.guest_disk_info | dict2items | selectattr('value.backing_datastore', 'defined') | list }}"
+
+      - name: Collect datastore names used by this VM
+        ansible.builtin.set_fact:
+          datastore_names: "{{ valid_disks | map(attribute='value.backing_datastore') | list }}"
+
+      - name: Gather datastores info
+        community.vmware.vmware_datastore_info:
+          hostname: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username | default() }}"
+          password: "{{ vcenter_password | default()}}"
+          datacenter_name: "{{ vm_datacenter | default() }}"
+          name: "{{ item }}"
+          validate_certs: false
+        register: datastores_info
+        loop: "{{ datastore_names | list | unique }}"
+
+      - name: Set fact with datastore info
+        ansible.builtin.set_fact:
+          insufficient_datastores: []
+
+      - name: Check datastore free space
+        ansible.builtin.set_fact:
+          insufficient_datastores: "{{ insufficient_datastores + item.datastores | map(attribute='name') | list }}"
+        loop: "{{ datastores_info.results }}"
+        when: (item.datastores.0.freeSpace/item.datastores.0.capacity) * 100 < 20
+
+      - name: Setting status code as FunctionalFailed - when VMs any datastore free space is less than 20%
+        ansible.builtin.set_fact:
+          status_code: "FunctionalFailed"
+        when: insufficient_datastores | length > 0
+
+      - name: Validation - Fail when VMs any datastore free space is less than 20%
+        ansible.builtin.fail:
+          msg: "{{ insufficient_datastores | join(',') }} Datastore free space is less than 20%, skipping the create VM snapshot task"
+        when: insufficient_datastores | length > 0
+
+      - name: Store RAW disk info in variable
+        ansible.builtin.set_fact:
+          raw_disk_info: "{{ disk_fact.guest_disk_info | dict2items | selectattr('value.backing_type', 'eq', 'RawDiskMappingVer1') | list }}"
+
+      - name: Setting status code as FunctionalFailed - when Raw disk mapping found on VM
+        ansible.builtin.set_fact:
+          status_code: "FunctionalFailed"
+        when: raw_disk_info | length > 0
+
+      - name: Validation - Fail when Raw disk mapping found on VM
+        ansible.builtin.fail:
+          msg: "RAW disk found on VM, hence stopping further executions"
+        when: raw_disk_info | length > 0
+
+      - name: Initialize disk_sizes variable
+        ansible.builtin.set_fact:
+          disk_sizes: []
+
+      - name: Store VM disk sizes in variable
+        ansible.builtin.set_fact:
+          disk_sizes: "{{ disk_sizes + [item.capacity_in_bytes | int] }}"
+        when: disk_fact.guest_disk_info is defined
+        loop: "{{ disk_fact.guest_disk_info.values() | list }}"
+        loop_control:
+          label: "{{ item.label }}"
+
+      - name: Calculate and store total disk size in variable
+        ansible.builtin.set_fact:
+          total_disk_size_gb: "{{ (disk_sizes | sum / 1024 / 1024 / 1024) | round(2) }}"
+        when: disk_sizes | length > 0
+
+      - name: Setting status code as FunctionalFailed - when VM total disk size is more than 2TB
+        ansible.builtin.set_fact:
+          status_code: "FunctionalFailed"
+        when: total_disk_size_gb | int >= 2048
+
+      - name: Validation - Fail when VM total disk size is more than 2TB
+        ansible.builtin.fail:
+          msg: "VM total disks size is {{ (total_disk_size_gb | int / 1000) | round(2) }} TB, which is greater than 2 TB, hence stopping further executions"
+        when: total_disk_size_gb | int >= 2048
+
+      - name: Take snapshot of a vm using memory flag on - memory size less than 64GB
+        community.vmware.vmware_guest_snapshot:
+          hostname: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username | default() }}"
+          password: "{{ vcenter_password | default() }}"
+          datacenter: "{{ datacenter_name | default() }}"
+          uuid: "{{ vm_uuid | default() }}"
+          state: present
+          snapshot_name: "{{ snap_name | default() }}"
+          quiesce: no
+          memory_dump: yes
+          validate_certs: false
+        when: vm_mem | int  < 65536 and total_disk_size_gb | int < 2048 and raw_disk_info | length == 0 and insufficient_datastores | length == 0
+
+      - name: Take snapshot of a vm without memory flag on - memory size more than 64GB
+        community.vmware.vmware_guest_snapshot:
+          hostname: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username | default() }}"
+          password: "{{ vcenter_password | default() }}"
+          datacenter: "{{ datacenter_name | default() }}"
+          uuid: "{{ vm_uuid | default() }}"
+          state: present
+          snapshot_name: "{{ snap_name | default() }}"
+          quiesce: no
+          memory_dump: no
+          validate_certs: false
+        when: vm_mem | int >= 65536 and total_disk_size_gb | int < 2048 and raw_disk_info | length == 0 and insufficient_datastores | length == 0
+
+      - name: Gather snapshot info of the VM
+        community.vmware.vmware_guest_snapshot_info:
+          hostname: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username | default() }}"
+          password: "{{ vcenter_password | default()}}"
+          datacenter: "{{ datacenter_name | default() }}"
+          uuid: "{{ vm_uuid | default() }}"
+          validate_certs: false
+        register: snapshot_info
+
+      - name: Check snapshot created or not
+        ansible.builtin.set_fact:
+          snapshot_created: true
+        when: item.name == snap_name
+        loop: "{{ snapshot_info.guest_snapshots.snapshots }}"
+        loop_control:
+          label: "Snapshot- {{ item.name }}"
+
+      - name: Setting status code as FunctionalFailed - when new snapshot not found
+        ansible.builtin.set_fact:
+          status_code: "FunctionalFailed"
+        when: not snapshot_created
+
+      - name: Validation - Fail when new snapshot not found
+        ansible.builtin.fail:
+          msg: "Snapshot not created, stopping further executions"
+        when: not snapshot_created
+
+      - name: ServiceTheater success update
+        ansible.builtin.debug:
+          msg:
+            - "target_host        : {{ vm_name | default() }}"
+            - "task_name          : Check VM snapshot status"
+            - "status_msg         : The VM {{ hostname }} snapshot {{ snap_name | default() }} has been created"
+            - "status             : InProgress"
+            - "execution_date_time: {{ ist_time | default() }}"
+        when: snapshot_created
+
+      rescue:
+      - name: ServiceTheater failure update
+        ansible.builtin.debug:
+          msg:
+            - "target_host        : {{ vm_name | default() }}"
+            - "task_name          : {{ ansible_failed_task['name'] }}"
+            - "status_msg         : {{ ansible_failed_result['msg'] }}"
+            - "status             : {{ status_code | default() }}"
+            - "execution_date_time: {{ ist_time | default() }}"
+
+      - name: Fail further execution when rescue block triggered
+        ansible.builtin.fail:
+          msg: "{{ hostname }} virtual machine snapshot creation failed, please check above logs for more details"
