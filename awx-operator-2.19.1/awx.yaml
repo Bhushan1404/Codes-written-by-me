@@ -1,0 +1,12 @@
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata: 
+   name: awx
+   namespace: awx
+spec: 
+  service_type: ClusterIP
+  ingress_type: ingress
+  ingress_tls_secret: awx-ssl-secret
+  hostname: szdeho-sd220046.sandoz.net
+  #admin_user: admin
+  # admin_password_secret: wipro@123

@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+   name: awx-cert
+   namespace: awx
+spec:
+   secretName: awx-ssl-secret
+   issuerRef:
+      name: letsencrypt-issuer
+   commonName: szdeho-ss220046.sandoz.net
+   dnsNames:
+       - szdeho-ss220046.sandoz.net

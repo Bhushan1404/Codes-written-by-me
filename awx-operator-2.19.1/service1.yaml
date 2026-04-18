@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: '{"apiVersion":"v1","kind":"Service","metadata":{"labels":{"app.kubernetes.io/component":"awx","app.kubernetes.io/managed-by":"awx-operator","app.kubernetes.io/operator-version":"2.19.1","app.kubernetes.io/part-of":"sandoz-demo"},"name":"sandoz-demo-service","namespace":"awx"},"spec":{"ports":[{"name":"http","port":80,"protocol":"TCP","targetPort":8052}],"selector":{"app.kubernetes.io/component":"awx","app.kubernetes.io/managed-by":"awx-operator","app.kubernetes.io/name":"sandoz-demo-web"},"type":"NodePort"}}'
+  creationTimestamp: "2025-01-10T09:06:22Z"
+  labels:
+    app.kubernetes.io/component: awx
+    app.kubernetes.io/managed-by: awx-operator
+    app.kubernetes.io/operator-version: 2.19.1
+    app.kubernetes.io/part-of: sandoz-demo
+  name: sandoz-demo-service
+  namespace: awx
+  ownerReferences:
+  - apiVersion: awx.ansible.com/v1beta1
+    kind: AWX
+    name: sandoz-demo
+    uid: fa0eba47-9741-4a08-a899-da559fb6a184
+  resourceVersion: "153834"
+  uid: 573194c1-458b-4fa7-a0dd-d71321a8a158
+spec:
+  clusterIP: 10.43.72.246
+  clusterIPs:
+  - 10.43.72.246
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: http
+    nodePort: 32146
+    port: 80
+    protocol: TCP
+    targetPort: 8052
+  - name: https
+    port: 443
+    protocol: TCP
+    targetPort: 443
+  selector:
+    app.kubernetes.io/component: awx
+    app.kubernetes.io/managed-by: awx-operator
+    app.kubernetes.io/name: sandoz-demo-web
+  sessionAffinity: None
+  type: NodePort
+status:
+  loadBalancer: {}

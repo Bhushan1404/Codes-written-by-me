@@ -1,0 +1,12 @@
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: sandoz-demo
+spec:
+        #ports: 
+  #   - protocol: TCP
+ #     targetPort: 8052
+  service_type: nodeport
+  #  protocol: TCP
+  # nodeport: 31006
