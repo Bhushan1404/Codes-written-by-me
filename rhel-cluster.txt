@@ -1,0 +1,98 @@
+RHEL CLUSTER BUILT
+ 
+reference 
+https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/8/html-single/configuring_and_managing_high_availability_clusters/index#con_high-availability-add-on-components-overview-of-high-availability
+ 
+1. First create below repo on both node
+ 
+After that run below command
+ 
+Yum clean all
+ 
+Yum repolist  
+ 
+And after that install the packages as below  
+ 
+[root@lmaj3020 ~]# yum install fence-agents --all pcs pacemaker corosync                //run on both node
+ 
+2. start and enable pcsd service
+ 
+3.[root@lmaj3010 yum.repos.d]# pcs host auth lmaj3010 lmaj3020                //run on primary node to authenticate both node with eachother  
+ 
+Username: hacluster
+ 
+Password:
+ 
+lmaj3010: Authorized
+ 
+lmaj3020: Authorized
+ 
+4 .[root@lmaj3010 yum.repos.d]# pcs cluster setup prodcluster --start lmaj3010 lmaj3020                  //run on primary node
+ 
+5. SBD CONFIGURATION
+ 
+6.dracut -f -v
+ 
+then we can start making filesystems
+ 
+ 
+pvcreate /dev/sdc
+ 
+ 
+vgcreate vg_kis1p /dev/sdc
+ 
+lvcreate -L 22G -n /dev/vg_kis1p/lv_cosp
+ 
+lvcreate -L 250G -n /dev/vg_kis1p/lv_cosp_cosimp_dokarchiv
+ 
+lvcreate -L 1G -n /dev/vg_kis1p/lv_home_sfcosp01
+ 
+ 
+mkfs.xfs /dev/vg_kis1p/lv_oracle_kis1p
+ 
+mkfs.xfs /dev/vg_kis1p/lv_oracle_kis1p_arch
+ 
+mkfs.xfs /dev/vg_kis1p/lv_oracle_kis1p_data01
+ 
+7.mkdir -p /bmc/KIS1P
+ 
+mkdir -p /oracle/KIS1P/12.1.0.2
+ 
+mkdir -p /oracle/KIS1P/19.0.0.0
+ 
+ 
+vgs -o+systemid
+ 
+pcs resource create KIS1P-VG ocf:heartbeat:LVM-activate vgname=vg_kis1p activation_mode=exclusive vg_access_mode=system_id --group HA-KIS1P
+ 
+pcs resource create KIS1P-FS09 ocf:heartbeat:Filesystem device=/dev/vg_kis1p/lv_bmc_kis1p directory=/bmc/KIS1P fstype=xfs --group HA-KIS1P
+ 
+pcs resource create KIS1P-FS10 ocf:heartbeat:Filesystem device=/dev/vg_kis1p/lv_cosp directory=/COSP fstype=xfs --group HA-KIS1P
+ 
+pcs resource create KIS1P-FS11 ocf:heartbeat:Filesystem device=/dev/vg_kis1p/lv_cosp_cosimp_dokarchiv directory=/COSP/cosimp/dokarchiv fstype=xfs --group HA-KIS1P
+ 
+ 
+8. pcs resource group add HA-KIS1P VIP_KIS1P
+ 
+pcs resource group add HA-TAD1P VIP_TAD1P
+ 
+9.User and group creation
+ 
+10.Some pcs commands
+ 
+ 
+pcs node standby lmaj3010
+ 
+pcs node unstandby lmaj3010
+ 
+pcs constraint config
+ 
+pcs status
+ 
+pcs resource group add HA-TAD1P VIP_TAD1P
+ 
+pcs status –full
+ 
+pcs cluster start
+ 
+pcs cluster stop
