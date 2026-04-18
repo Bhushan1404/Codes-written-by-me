@@ -1,0 +1,53 @@
+---
+template_name: RHEL9_Template_Latest
+datacenter_name: DEFR-DC
+resource_pool: ServiceTheator-RP
+var_ipadd: 10.145.164.39
+os_map:
+  Linux server for PLM: Red Hat Enterprise Linux 8 (64-bit)
+cluster_names:
+  - DEFR-PROD01
+  - DEFR-PROD02
+datastore_map:
+  DEFR-PROD01: PROD01_vsanDatastore
+  DEFR-PROD02: PROD02_vsanDatastore
+utilization_threshold: 80
+qualified_clusters: []
+disqualified_clusters: []
+ipam_username: "S0005999"
+ipam_host: "https://dest-eipddip01.itc.global.mahle"
+domain_username: "S0005968"
+var_vcenter_username: "S0005885"
+var_vcenter_host: "defr-vcsa01.itc.global.mahle"
+cyberark_host: "dest-fiadml02.itc.global.mahle:8443"
+app_id_vcenter: AWX_AWX_WIPRO
+app_id_ipam: AWX_AWX_WIPRO
+app_id_domain: AWX_AWX_WIPRO
+folder_name: /DEFR-DC/vm
+var_vmnetwork_old: DEFR-PRD2-TOOLS
+var_domain: itc.global.mahle
+var_dns1: 10.200.75.50
+var_dns2: 10.22.156.90
+
+
+storage_map:
+  DEFR-PROD01:
+    Gold_Server_Virtual:
+      policy: DEFR_PROD01_Mirrored_SP01
+      datastore: PROD01_vsanDatastore
+    Silver_Server_Virtual:
+      policy: DEF2_PROD01_Non-Mirrored_SP01
+      datastore: PROD01_vsanDatastore
+    Bronze_Server_Virtual:
+      policy: DEF2_PROD01_Non-Mirrored_SP01
+      datastore: PROD01_vsanDatastore
+  DEFR-PROD02:
+    Gold_Server_Virtual:
+      policy: DEFR_PROD02_Mirrored_SP01
+      datastore: PROD02_vsanDatastore
+    Silver_Server_Virtual:
+      policy: DEF2_PROD02_Non-Mirrored_SP01
+      datastore: PROD02_vsanDatastore
+    Bronze_Server_Virtual:
+      policy: DEF2_PROD02_Non-Mirrored_SP01
+      datastore: PROD02_vsanDatastore

@@ -1,0 +1,89 @@
+---
+- name: Upgrade VMware Tools and Hardware Compatibility For Linux
+  hosts: localhost
+  gather_facts: true
+  no_log: false
+  tasks:
+    - name: Perform Hardware upgrade on Linux VM
+      block:
+        - name: Get vcenter credentials from cyberark
+          ansible.builtin.uri:
+            url: https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{
+              app_id_vcenter | default() }}&username={{ var_vcenter_username |
+              default() }}
+            method: GET
+            validate_certs: false
+            return_content: true
+          register: vcenter_cred
+          no_log: true
+        - name: Retrieve VM info
+          community.vmware.vmware_vm_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            vm_name: "{{ var_hostname }}"
+          register: vm_info
+        - name: Set datacenter_name and vm_moid variable
+          ansible.builtin.set_fact:
+            datacenter_name: "{{ vm_info.virtual_machines[0].datacenter }}"
+            vm_moid: "{{ vm_info.virtual_machines[0].moid }}"
+        - name: Ensure VM is powered on (VMware Tools upgrade requires this)
+          community.vmware.vmware_guest_powerstate:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name | default() }}"
+            name: "{{ var_hostname }}"
+            state: powered-on
+        - name: Power off VM before hardware upgrade
+          community.vmware.vmware_guest_powerstate:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name | default() }}"
+            name: "{{ var_hostname }}"
+            state: powered-off
+        - name: Upgrade VM hardware compatibility to match host
+          vmware.vmware_rest.vcenter_vm_hardware:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            vm: "{{ vm_moid | default() }}"
+            state: upgrade
+            upgrade_policy: AFTER_CLEAN_SHUTDOWN
+          register: upgrade_result
+        - name: Power on VM after hardware upgrade
+          community.vmware.vmware_guest_powerstate:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name | default() }}"
+            name: "{{ var_hostname }}"
+            state: powered-on
+        - name: Wait for Linux server to power on
+          ansible.builtin.wait_for:
+            timeout: 30
+          delegate_to: localhost
+        - name: ServiceTheater Update for all tasks in Hardware upgrade
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Hardware upgrade"
+              - "status_msg         : Hardware are upgraded on server - {{
+                var_hostname }} "
+              - "status             : Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+      rescue:
+        - name: ServiceTheater Failure Update for all tasks in VMWare Tools upgrade and
+            Hardware upgrade
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+        - name: Failing the playbook if any task failed in the Hardware upgrade block
+          ansible.builtin.fail:
+            msg: Error during playbook execution please check the respective failed task for
+              more information

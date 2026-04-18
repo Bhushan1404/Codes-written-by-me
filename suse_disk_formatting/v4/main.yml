@@ -1,0 +1,117 @@
+---
+- name: Create dynamic inventory
+  hosts: localhost
+  gather_facts: false
+  vars:
+    var_ipadd: "{{ var_ipadd }}"
+  tasks:
+    - name: Create dynamic inventory for cluster nodes
+      ansible.builtin.add_host:
+        name: "{{ item | trim }}"
+        ansible_user: "{{ ansible_user | default() }}"
+        ansible_password: "{{ ansible_password | default() }}"
+        ansible_ssh_port: 5986
+        ansible_connection: winrm
+        ansible_winrm_server_cert_validation: ignore
+        group: temp_hosts
+      with_items: "{{ var_ipadd }}"
+- name: Run post-disk script on the provisioned Linux VM
+  hosts: temp_hosts
+  gather_facts: true
+  become: true
+  vars:
+    volume_label: Data Disk
+    ansible_winrm_proxy: null
+  tasks:
+    - name: Disk formatting in progress
+      block:
+        - name: Find unmounted disks (excluding sda and its partitions)
+          ansible.builtin.shell: |
+            set -o pipefail
+            lsblk -nr -o NAME,MOUNTPOINT | awk '$2 == ""' | grep -v
+            '^sda' | head -n 1 | awk '{print $1}'
+          register: unmounted_disk
+          changed_when: false
+        - name: Fail if no unmounted disk found
+          ansible.builtin.fail:
+            msg: No unmounted (new) device found.
+          when: unmounted_disk.stdout == ""
+        - name: Set added device variable
+          ansible.builtin.set_fact:
+            added_device: /dev/{{ unmounted_disk.stdout }}
+            disk_name: "{{ unmounted_disk.stdout }}"
+        - name: Set unique VG, LV, and mount point names
+          ansible.builtin.set_fact:
+            vg_name: vg_{{ disk_name | default() }}
+            lv_name: lv_{{ disk_name | default() }}
+            mount_point: /mnt/{{ disk_name | default() }}
+        - name: Create physical volume
+          ansible.builtin.command: pvcreate "{{ added_device | default() }}"
+          register: pvcreate_result
+          changed_when: false
+        - name: Create volume group
+          ansible.builtin.command: vgcreate "{{ vg_name | default() }}" "{{ added_device | default() }}"
+          register: vgcreate_result
+          changed_when: false
+        - name: Create logical volume
+          ansible.builtin.command: lvcreate -l 100%FREE -n "{{ lv_name | default() }}" "{{
+            vg_name | default() }}"
+          register: lvcreate_result
+          changed_when: false
+        - name: Format logical volume with filesystem type
+          ansible.builtin.command: mkfs.{{ fs_type }} /dev/{{ vg_name | default() }}/{{
+            lv_name | default() }}
+          register: mkfs_result
+          changed_when: false
+        - name: Create mount point
+          ansible.builtin.file:
+            path: "{{ mount_point | default() }}"
+            state: directory
+            mode: "0755"
+        - name: Mount logical volume
+          ansible.posix.mount:
+            path: "{{ mount_point | default() }}"
+            src: /dev/{{ vg_name | default() }}/{{ lv_name | default() }}
+            fstype:
+              "{ fs_type | default()) }": null
+            state: present
+          register: mount_result
+        - name: Get UUID of logical volume
+          ansible.builtin.command: blkid -s UUID -o value /dev/{{ vg_name | default()
+            }}/{{ lv_name | default() }}
+          register: lv_uuid
+          changed_when: false
+        - name: Add entry to /etc/fstab for persistent mounting
+          ansible.builtin.lineinfile:
+            mode: "0644"
+            path: /etc/fstab
+            line: UUID={{ lv_uuid.stdout }} {{ mount_point | default() }} {{ fs_type |
+              default() }} defaults 0 0
+            state: present
+            create: true
+        - name: Show disk setup summary
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Check Disk setup status"
+              - "status_msg         : The new disk has been initialized and
+                formatted on server {{ inventory_hostname | default('') }} with
+                format: {{ fs_type }}"
+              - "VG                 : {{ vg_name | default() }}"
+              - "LV                 : {{ lv_name | default() }}"
+              - "mount_point        : {{ mount_point | default() }}"
+              - "status             : Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+      rescue:
+        - name: ServiceTheater Failure Update for all tasks in VM disk setup block
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+        - name: Failing the playbook if any task failed in the VM disk setup block
+          ansible.builtin.fail:
+            msg: Error during playbook execution. Please check the respective failed task
+              for more information.

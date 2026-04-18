@@ -1,0 +1,275 @@
+---
+- name: GET free IP and reserve
+  hosts: localhost
+  gather_facts: true
+
+  vars:
+    subnet_info_endpoint: "/rest/ip_block_subnet_list"
+    free_ip_endpoint: "/rpc/ip_find_free_address"
+    validate_certs: false
+    request_timeout: 60
+
+  vars_files:
+    - vars_vm_prov.yml
+  tasks:
+
+    - name: Get vcenter credentials from cyberark
+      ansible.builtin.uri:
+        url: "https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{ app_id_vcenter | default() }}&username={{ var_vcenter_username | default() }}"
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: vcenter_cred
+      no_log: true
+
+    # Block - 1 Reserve IP in IPAM
+    - name: Reserve IP in IPAM
+      block:
+        - name: Get password from cyberark for IPAM Service account
+          ansible.builtin.uri:
+            url: "https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{ app_id_ipam | default() }}&username={{ ipam_username | default() }}"
+            method: GET
+            validate_certs: "{{ validate_certs }}"
+            return_content: true
+          register: aim_response
+          no_log: true
+
+        - name: Base64-encode credentials
+          ansible.builtin.set_fact:
+            ipam_username_b64: "{{ ipam_username | default() | b64encode }}"
+            ipam_password_b64: "{{ aim_response.json.Content | b64encode }}"
+
+        - name: Call IPAM API to get subnet info
+          ansible.builtin.uri:
+            url: "{{ ipam_host | default() }}{{ subnet_info_endpoint }}?WHERE=subnet_name='{{ item }}'"
+            method: GET
+            headers:
+              X-IPM-Username: "{{ ipam_username_b64 | default() }}"
+              X-IPM-Password: "{{ ipam_password_b64 | default() }}"
+            return_content: true
+            validate_certs: "{{ validate_certs }}"
+            timeout: "{{ request_timeout }}"
+            status_code:
+              - 200
+          loop: "{{ vlans | default() }}"
+          register: vlan_data
+
+        - name: Build VLAN -> subnet_ip_used_percent list
+          ansible.builtin.set_fact:
+            vlan_usage: >-
+              {{
+                vlan_usage | default({}) |
+                combine({
+                  item.item: (
+                    (item.content | from_json)
+                    | map(attribute='subnet_ip_used_percent')
+                    | map('float')
+                    | list
+                  )
+                })
+              }}
+          loop: "{{ vlan_data.results }}"
+          no_log: true
+
+        - name: Compute min subnet_ip_used_percent per VLAN
+          ansible.builtin.set_fact:
+            vlan_usage_min: "{{ dict(vlan_usage.keys() | zip(vlan_usage.values() | map('min'))) }}"
+        - name: Pick VLAN with the least subnet_ip_used_percent
+          ansible.builtin.set_fact:
+            least_used_vlan: "{{ (vlan_usage_min | dict2items | sort(attribute='value') | first)['key'] }}"
+            least_used_value: "{{ (vlan_usage_min | dict2items | sort(attribute='value') | first)['value'] }}"
+          register: least_result
+        - name: Report VLAN with least subnet_ip_used_percent
+          ansible.builtin.debug:
+            msg: "VLAN {{ least_result.ansible_facts.least_used_vlan }} has the lowest subnet_ip_used_percent = {{ least_result.ansible_facts.least_used_value }}"
+        - name: Extract details of VLAN with least subnet_ip_used_percent
+          ansible.builtin.set_fact:
+            least_vlan_details: >-
+              {{
+                 (vlan_data.results
+                 | selectattr('item', 'equalto', least_used_vlan)
+                 | map(attribute='content')
+                 | map('from_json')
+                 | list)
+              }}
+        - name: Store required values from least_vlan_details
+          ansible.builtin.set_fact:
+            subnet_name: "{{ least_vlan_details[0][0].subnet_name }}"
+            subnet_id: "{{ least_vlan_details[0][0].subnet_id }}"
+            total_ips: "{{ least_vlan_details[0][0].subnet_size }}"
+            target_vlan_id: "{{ least_vlan_details[0][0].vlmvlan_vlan_id }}"
+            site_id: "{{ least_vlan_details[0][0].site_id }}"
+            var_dftgtw: "{{ (least_vlan_details[0][0].subnet_class_parameters.split('&') | select('search', '^gateway=') | first).split('=')[1] }}"
+        - name: Calculate prefix and netmask using Bash
+          ansible.builtin.shell: |
+            total_ips={{ total_ips | default() }}
+            prefix=$(awk -v n=$total_ips 'BEGIN {print 32 - int(log(n)/log(2))}')
+            mask=$(( 0xffffffff << (32 - prefix) & 0xffffffff ))
+            netmask=$(printf "%d.%d.%d.%d" \
+              $(( (mask >> 24) & 255 )) \
+              $(( (mask >> 16) & 255 )) \
+              $(( (mask >> 8) & 255 )) \
+              $(( mask & 255 )))
+            echo "$netmask"
+          register: subnet_mask
+          changed_when: false
+
+        - name: Store netmask
+          ansible.builtin.set_fact:
+            var_netmask: "{{ subnet_mask.stdout_lines[0] }}"
+
+        - name: Confirm if vlan is present
+          community.vmware.vmware_dvs_portgroup_find:
+            hostname: '{{ var_vcenter_host | default() }}'
+            username: '{{ var_vcenter_username | default() }}'
+            password: '{{ vcenter_cred.json.Content }}'
+            vlanid: "{{ target_vlan_id | default() }}"
+          register: network_info
+
+        # Extract only the names where vlan_id == target_vlan_id
+        - name: Build list of matching DVPG names
+          ansible.builtin.set_fact:
+            matching_names: >-
+              {{
+                (network_info.dvs_portgroups)
+                | selectattr('trunk', 'equalto', false)
+                | selectattr('vlan_id', 'equalto', (target_vlan_id | default() | string))
+                | map(attribute='name')
+                | list
+              }}
+
+        - name: Set network name
+          ansible.builtin.set_fact:
+            var_vmnetwork: "{{ matching_names | default() | first }}"
+
+        - name: Call ipam API to get free IP
+          ansible.builtin.uri:
+            url: "{{ ipam_host | default() }}{{ free_ip_endpoint }}?subnet_id={{ subnet_id | default() }}&max_find=1"
+            method: GET
+            headers:
+              X-IPM-Username: "{{ ipam_username_b64 | default() }}"
+              X-IPM-Password: "{{ ipam_password_b64 | default() }}"
+            return_content: true
+            validate_certs: "{{ validate_certs }}"
+            timeout: "{{ request_timeout }}"
+            status_code:
+              - 200
+          register: free_ip_data
+
+        - name: Extract hostaddr from free_ip_data
+          ansible.builtin.set_fact:
+            parsed_content: "{{ free_ip_data.content | from_json }}"
+
+        - name: Set hostaddr
+          ansible.builtin.set_fact:
+            var_ipadd: "{{ parsed_content[0].hostaddr }}"
+
+        - name: Reserve IP address
+          ansible.builtin.uri:
+            url: "{{ ipam_host | default() }}/rest/ip_add"
+            method: POST
+            validate_certs: "{{ validate_certs }}"
+            headers:
+              X-IPM-Username: "{{ ipam_username_b64 | default() }}"
+              X-IPM-Password: "{{ ipam_password_b64 | default() }}"
+              Content-Type: "application/json"
+            body_format: json
+            return_content: true
+            timeout: "{{ request_timeout }}"
+            status_code: [200, 201]
+            body:
+              site_id: "{{ site_id | default() }}"
+              subnet_id: "{{ subnet_id | default() }}"
+              ip_addr: "{{ var_ipadd | default() }}"
+              name: "{{ var_hostname }}.{{ var_domain | default() }}"
+              ip_class_name: "ST_managed"
+              hostdev_id: "0"
+              ip_class_parameters:
+                description: "Automatically reserved via ST"
+                created_by: "ST"
+                created_date: "{{ ansible_date_time.iso8601 }}"
+          register: ip_reservation
+          when: var_ipadd is defined
+
+        - name: Confirm IP reservation
+          ansible.builtin.debug:
+            msg: "IP {{ var_ipadd | default() }} successfully reserved (ID: {{ ip_reservation.json[0].ret_oid }})"
+          when: ip_reservation is succeeded
+
+        - name: Debug
+          ansible.builtin.debug:
+            msg:
+              var_ipadd: "{{ var_ipadd | default() }}"
+
+        - name: Debug
+          ansible.builtin.debug:
+            msg:
+              var_netmask: "{{ var_netmask | default() }}"
+
+        - name: Debug
+          ansible.builtin.debug:
+            msg:
+              var_dftgtw: "{{ var_dftgtw | default() }}"
+
+        - name: Debug
+          ansible.builtin.debug:
+            msg:
+              var_vmnetwork: "{{ var_vmnetwork | default() }}"
+
+        - name: Debug all output
+          ansible.builtin.debug:
+            msg:
+              - "Subnet Name: {{ subnet_name | default() }}"
+              - "Netmask: {{ var_netmask | default() }}"
+              - "Gateway: {{ var_dftgtw | default() }}"
+              - "VLAN ID: {{ target_vlan_id | default() }}"
+              - "Network Name: {{ var_vmnetwork | default() }}"
+              - "Free IP: {{ var_ipadd | default() }}"
+
+        # Validate if IP reserved is free to use
+        - name: Ping the target IP
+          ansible.builtin.command: "ping -c 2 {{ var_ipadd | default() }}"
+          register: ping_result
+          ignore_errors: true
+          changed_when: false
+
+        # Update ST - if IP provided is free to use
+        - name: Validate IP
+          ansible.builtin.assert:
+            that:
+              - ping_result.rc != 0
+            success_msg: "IP: {{ var_ipadd | default() }} is free (not responding to ping)."
+            fail_msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Validate if IP provided is free to use "
+              - "status_msg         : Free IP - {{ var_ipadd | default() }} reserved for VM - {{ var_hostname }} is already in use (responding to ping)."
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        # Update ServiceTheater
+        - name: "ServiceTheater Update for all tasks in IP reserve"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Free IP Reserve"
+              - "status_msg         : Free IP - {{ var_ipadd | default() }} reserved for VM - {{ var_hostname }} "
+              - "status             : Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+          when: ip_reservation is succeeded
+
+      rescue:
+
+        # Update ServiceTheater if any task failed in IP reserve
+        - name: "ServiceTheater Failure Update for all tasks in IP reserve"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        # Fail the playbook if any task failed in the playbook
+        - name: Failing the playbook if any task failed in IP reserve block
+          ansible.builtin.fail:
+            msg: "Error during playbook execution please check the respective failed task for more information"

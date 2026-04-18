@@ -1,0 +1,29 @@
+---
+- name: Determine storage policy and datastore for VM
+  hosts: localhost
+  gather_facts: false
+  vars:
+    cluster: "{{ CLUSTER }}"
+    storage: "{{ var_offering }}"
+  vars_files:
+    - var_list_linux.yml
+  tasks:
+    - name: Validate inputs
+      ansible.builtin.fail:
+        msg: "Invalid cluster or Storage Policy. Allowed clusters: DEFR-PROD01,
+          DEFR-PROD02. Storage_polices: Gold_Server_Virtual,
+          Silver_Server_Virtual, Bronze_Server_Virtual."
+      when: storage_map[cluster] is not defined or
+        storage_map[cluster][storage] is not defined
+    - name: Set selected storage values
+      ansible.builtin.set_fact:
+        storage_policy: "{{ storage_map[cluster][storage].policy }}"
+        datastore: "{{ storage_map[cluster][storage].datastore }}"
+    - name: Debug
+      ansible.builtin.debug:
+        msg:
+          storage_policy: "{{ storage_policy | default() }}"
+    - name: Debug available datastore
+      ansible.builtin.debug:
+        msg:
+          vm_datastore: "{{ datastore | default() }}"

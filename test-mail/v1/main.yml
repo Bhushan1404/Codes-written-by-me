@@ -1,0 +1,21 @@
+---
+- name: Test sending email via SMTP
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Send test mail
+      community.general.mail:
+        host: <smtp server>
+        port: <port>
+        from: <emailid>
+        to: "bhushan.mane@xyz.com"
+        subject: Test mail from ST
+        body: |
+          Hello,
+
+          This is test email sent via Ansible using ST.
+
+
+          Regards,
+          ServiceTheater Team
+        secure: never

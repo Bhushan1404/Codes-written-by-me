@@ -1,0 +1,108 @@
+---
+- name: Add a new disk to a Linux VM
+  hosts: localhost
+  gather_facts: true
+  vars_files:
+    - var_list_linux.yml
+  vars:
+    disk_type: "thin"
+
+  tasks:
+    - name: Get vcenter credentials from cyberark
+      ansible.builtin.uri:
+        url: https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{ app_id_vcenter | default() }}&username={{
+          var_vcenter_username | default() }}
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: vcenter_cred
+      no_log: true
+    # Block - 1 Add a new disk to VM
+    - name: Add a new disk to VM
+      block:
+        - name: Gather VM info
+          community.vmware.vmware_vm_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            vm_name: "{{ var_hostname }}"
+          register: vm_info
+          failed_when: false
+
+        # Print the virtual machine information
+        - name: Print the VM information
+          ansible.builtin.debug:
+            var: vm_info
+
+        # store datacenter name and ip address
+        - name: Set datacenter name and ip address
+          ansible.builtin.set_fact:
+            var_datacenter: "{{ vm_info.virtual_machines[0].datacenter }}"
+            var_ipadd: "{{ vm_info.virtual_machines[0].ip_address }}"
+
+        - name: Debug
+          ansible.builtin.debug:
+            msg:
+              var_ipadd: "{{ var_ipadd | default() }}"
+
+        - name: Get VM disk info from vCenter
+          community.vmware.vmware_guest_disk_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ var_datacenter | default() }}"
+            name: "{{ var_hostname }}"
+          register: existing_disk_info
+
+        - name: Set disk parameters from first disk (if available)
+          ansible.builtin.set_fact:
+            disk_type: "{{ disk_type }}"
+            disk_unit_number: "{{ existing_disk_info.guest_disk_info | length }}"
+            controller_type: "{{ existing_disk_info.guest_disk_info['0'].controller_type }}"
+            controller_number: "{{ existing_disk_info.guest_disk_info['0'].controller_bus_number }}"
+          when: existing_disk_info.guest_disk_info is defined and existing_disk_info.guest_disk_info | length > 0
+
+        - name: Add new disk to VM
+          community.vmware.vmware_guest_disk:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ var_datacenter | default() }}"
+            name: "{{ var_hostname }}"
+            disk:
+              - size_gb: "{{ disk_size_gb | int }}"
+                datastore: "{{ datastore_name }}"
+                unit_number: "{{ disk_unit_number | int }}"
+                controller_type: "{{ controller_type | default() }}"
+                controller_number: "{{ controller_number | int }}"
+                state: present
+          register: disk_add_info
+
+        - name: Output confirmation
+          ansible.builtin.debug:
+            msg: "Extended disk of size {{ disk_size_gb }} GB to VM {{ var_hostname }} on datastore {{ datastore_name }} with unit number {{ disk_unit_number | default() }}"
+
+        # Update ServiceTheater
+        - name: "ServiceTheater Update for all tasks in VM disk addition"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Check Disk addition status"
+              - "status_msg         : New disk of size {{ disk_size_gb }}GB has been added to VM - {{ var_hostname }}"
+              - "status             : Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+      rescue:
+        # Update ServiceTheater if any task failed in the VM disk addition
+        - name: "ServiceTheater Failure Update for all tasks in VM disk addition block"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        # Fail the playbook if any task failed in the playbook
+        - name: Failing the playbook if any task failed in the VM disk addition block
+          ansible.builtin.fail:
+            msg: "Error during playbook execution please check the respective failed task for more information"

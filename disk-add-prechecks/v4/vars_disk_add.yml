@@ -1,0 +1,6 @@
+---
+var_vcenter_username: "S0005885"
+var_vcenter_host: "defr-vcsa01.itc.global.mahle"
+cyberark_host: "dest-fiadml02.itc.global.mahle:8443"
+app_id_vcenter: AWX_AWX_WIPRO
+disk_type: "thin"

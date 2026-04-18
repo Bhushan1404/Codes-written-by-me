@@ -1,0 +1,43 @@
+---
+- name: Add host to dynamic inventory
+  hosts: localhost
+  tasks:
+    - name: Adding host to dynamichosts
+      ansible.builtin.add_host:
+        name: "{{ var_ipadd }}"
+        groups: dynamic_hosts
+- name: Check ManageEngine agent is installed
+  hosts: dynamic_hosts
+  gather_facts: true
+  tasks:
+    - name: Check ManageEngine status
+      block:
+        - name: Show status of dcservice.service
+          ansible.builtin.command: systemctl status dcservice.service
+          register: service_status
+          ignore_errors: true
+          changed_when: false
+        - name: Display dcservice.service status
+          ansible.builtin.debug:
+            msg: "{{ service_status.stdout }}"
+        - name: ServiceTheater Update for all tasks in installation status
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Manage Engine installation status"
+              - "status_msg         : ManageEngine agent is installed"
+              - "status             : Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+      rescue:
+        - name: ServiceTheater Failure Update for all tasks in installation status block
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+        - name: Failing the playbook if any task failed in the installation status
+          ansible.builtin.fail:
+            msg: Error during playbook execution please check the respective failed task for
+              more information

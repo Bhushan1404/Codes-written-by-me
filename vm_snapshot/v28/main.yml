@@ -1,0 +1,227 @@
+---
+- name: Create Snapshot for VCenter VM
+  hosts: localhost
+  gather_facts: true
+  ignore_errors: true
+  vars:
+    vm_names: "{{ precheck_pass }}"
+  vars_files:
+    - var_list_linux.yml
+  tasks:
+    - name: Get vcenter credentials from cyberark
+      ansible.builtin.uri:
+        url: https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{
+          app_id_vcenter | default() }}&username={{ var_vcenter_username |
+          default() }}
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: vcenter_cred
+      no_log: true
+    - name: Gathering info for vm for snapshot
+      block:
+        - name: Desired nodelist fetch
+          ansible.builtin.set_fact:
+            snap_server_list: "{{ vm_names.split(',') | reject('equalto', '') | list }}"
+        - name: Gather only registered virtual machines
+          community.vmware.vmware_vm_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            vm_type: vm
+            validate_certs: false
+          register: vminfo
+        - name: Check VMs availability and set UUIDs
+          ansible.builtin.set_fact:
+            vm_uuids: "{{ vm_uuids | default([]) + [item.uuid] }}"
+          loop: "{{ vminfo.virtual_machines }}"
+          when: item.guest_name in snap_server_list
+          no_log: true
+        - name: Debug if no VMs are found
+          ansible.builtin.debug:
+            msg: Fail VMs found in VCenter matching the provided names
+          failed_when: vm_uuids is not defined or vm_uuids | length == 0
+        - name: Meta
+          ansible.builtin.meta: end_play
+          when: vm_uuids is not defined or vm_uuids | length == 0
+        - name: Create a mapping of UUIDs to their server names
+          ansible.builtin.set_fact:
+            uuid_to_name: "{{ uuid_to_name | default({}) | combine({item.uuid:
+              item.guest_name}) }}"
+          loop: "{{ vminfo.virtual_machines }}"
+          when: item.guest_name in snap_server_list
+          no_log: true
+        - name: Gather Memory info from each guest VM
+          community.vmware.vmware_guest_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            validate_certs: false
+            datacenter: "{{ datacenter_name }}"
+            uuid: "{{ item }}"
+            schema: vsphere
+            properties:
+              - config.hardware.memoryMB
+          delegate_to: localhost
+          loop: "{{ vm_uuids | default() }}"
+          register: vm_info
+          ignore_errors: true
+        - name: Set fact for vm memory
+          ansible.builtin.set_fact:
+            vm_mems: "{{ vm_mems | default({}) | combine({item.item:
+              item.instance.config.hardware.memoryMB}) }}"
+          loop: "{{ vm_info.results }}"
+          no_log: true
+        - name: Gather Disk facts for each VM
+          community.vmware.vmware_guest_disk_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name }}"
+            uuid: "{{ item }}"
+            validate_certs: false
+          delegate_to: localhost
+          loop: "{{ vm_uuids | default() }}"
+          register: disk_fact
+          ignore_errors: true
+        - name: Set datastore names for each VM
+          ansible.builtin.set_fact:
+            ds_names: "{{ ds_names | default({}) | combine({item.item:
+              item.guest_disk_info['0'].backing_datastore}) }}"
+          loop: "{{ disk_fact.results }}"
+          when: item.guest_disk_info is defined and '0' in item.guest_disk_info
+          no_log: true
+        - name: Gather info from datacenter about each datastore
+          community.vmware.vmware_datastore_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name }}"
+            name: "{{ item }}"
+            validate_certs: false
+          delegate_to: localhost
+          loop: "{{ ds_names.values() | list }}"
+          register: info
+          ignore_errors: true
+        - name: Debug Datastore values
+          ansible.builtin.debug:
+            var: ds_names.values ()
+        - name: Setfact of ds_frees
+          ansible.builtin.set_fact:
+            ds_frees: "{{ ds_frees | default({}) | combine({item.item:
+              (item.datastores[0].freeSpace / item.datastores[0].capacity *
+              100)}) }}"
+          loop: "{{ info.results }}"
+          no_log: true
+        - name: Debugging datastore free space
+          ansible.builtin.debug:
+            msg: Free space for datastore {{ item.datastores[0].name }} is {{
+              item.datastores[0].freeSpace }}
+          loop: "{{ info.results }}"
+          when: item.datastores | length > 0
+        - name: Initialize a list for successful snapshots
+          ansible.builtin.set_fact:
+            successful_snapshots: []
+        - name: Initialize snapshot VMs without memory flag when greater than 20% space
+          ansible.builtin.set_fact:
+            snapshot_name: snapshot-PT-BKUP-{{ lookup('pipe', 'date -d "now"
+              +"%m%d%y-%H%M%S"') }}
+        - name: Take snapshots of VMs without memory flag when greater than 20% space
+          community.vmware.vmware_guest_snapshot:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name }}"
+            uuid: "{{ item }}"
+            state: present
+            snapshot_name: "{{ snapshot_name | default() }}"
+            quiesce: false
+            memory_dump: true
+            validate_certs: false
+          delegate_to: localhost
+          loop: "{{ vm_uuids | default() }}"
+          when:
+            - (vm_mems[item] | int) < 16384 and (ds_frees[ds_names[item]] | int)
+              >= 20
+          register: snapshot_result
+          ignore_errors: true
+        - name: Record server names with successful snapshots for the first condition
+          ansible.builtin.set_fact:
+            successful_snapshots: "{{ successful_snapshots + (snapshot_result.results |
+              selectattr('changed', 'equalto', true) | map(attribute='item') |
+              list) }}"
+        - name: Take snapshots of VMs without memory flag when less than 20% space
+          community.vmware.vmware_guest_snapshot:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name }}"
+            uuid: "{{ item }}"
+            state: present
+            snapshot_name: "{{ snapshot_name | default() }}"
+            quiesce: false
+            memory_dump: false
+            validate_certs: false
+          delegate_to: localhost
+          loop: "{{ vm_uuids | default() }}"
+          when:
+            - (vm_mems[item] | int) < 16384 and (ds_frees[ds_names[item]] | int)
+              < 20
+          register: snapshot_result2
+          no_log: true
+          ignore_errors: true
+        - name: Record server names with successful snapshots for the first condition
+          ansible.builtin.set_fact:
+            successful_snapshots: "{{ successful_snapshots + (snapshot_result2.results |
+              selectattr('changed', 'equalto', true) | map(attribute='item') |
+              list) }}"
+        - name: Register server names for successful snapshots
+          ansible.builtin.set_fact:
+            successful_snapshot_names: "{{ successful_snapshot_names | default([]) +
+              [uuid_to_name[item]] }}"
+          loop: "{{ successful_snapshots | default() }}"
+          when: item in uuid_to_name
+        - name: Debug registered server names for successful snapshots
+          ansible.builtin.debug:
+            var: successful_snapshot_names
+        - name: Convert list to comma-separated string
+          ansible.builtin.set_fact:
+            successfull_vms: "{{ successful_snapshot_names | join(',') }}"
+        - name: Collect UUIDs where snapshot was not successful
+          ansible.builtin.set_fact:
+            failed_snapshots_uuids: "{{ vm_uuids | default([]) |
+              difference(successful_snapshots | default()) }}"
+        - name: Convert failed UUIDs to server name
+          ansible.builtin.set_fact:
+            failed_snapshot_names: "{{ failed_snapshot_names | default() + [uuid_to_name[item]] }}"
+          when: item in uuid_to_name
+        - name: Convert List to comma seprated
+          ansible.builtin.set_fact:
+            failed_snapshot: "{{ failed_snapshot_names | join(',') }}"
+        - name: Debug
+          ansible.builtin.debug:
+            msg:
+              patch_hosts: "{{ successfull_vms | default() }}"
+        - name: ServiceTheatre success update
+          ansible.builtin.debug:
+            msg:
+              - "target_host : {{ precheck_pass | default() }}"
+              - "task_name : VM Snapshot"
+              - status_msg: >
+                  Snapshot is successfully saved for - {{ successfull_vms | default()
+                  }}
+
+                  Snapshot name - {{ snapshot_name | default() }}"
+
+                  Snapshot is failed/skipped for - {{ failed_snapshot | default() }}
+              - "status : Success"
+              - "execution_date_time : {{ ansible_date_time.iso8601 }}"
+      rescue:
+        - name: ServiceTheatre failure update
+          ansible.builtin.debug:
+            msg:
+              - "target_host         : {{ vm_name | default() }}"
+              - "failed_task_name    : {{ ansible_failed_task.name }}"
+              - "status_msg          : {{ ansible_failed_result.msg }}"
+              - "status : Failed"
+              - "execution_date_time  : {{ ansible_date_time.iso8601 }}"

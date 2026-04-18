@@ -1,0 +1,95 @@
+---
+- name: Add disks to a Linux VM in vSphere based on disk_count
+  hosts: localhost
+  gather_facts: true
+  vars_files:
+    - var_list_linux.yml
+  vars:
+    datastore_name: "{{ vm_datastore }}"
+    # Define all disk size variables (some may be empty)
+    disk2_size_gb: "{{ var_disk2_size_gb }}"
+    disk3_size_gb: "{{ var_disk3_size_gb }}"
+    disk4_size_gb: "{{ var_disk4_size_gb }}"
+    disk5_size_gb: "{{ var_disk5_size_gb }}"
+    disk6_size_gb: "{{ var_disk6_size_gb }}"
+    disk_count: "{{ var_disk_count }}"
+
+  tasks:
+    - name: Get vcenter credentials from cyberark
+      ansible.builtin.uri:
+        url: "https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{ app_id_vcenter | default() }}&username={{ var_vcenter_username | default() }}"
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: vcenter_cred
+      no_log: true
+
+    - name: Add a new disk to VM
+      block:
+        - name: Gather VM info
+          community.vmware.vmware_vm_info:
+            hostname: '{{ var_vcenter_host | default() }}'
+            username: '{{ var_vcenter_username | default() }}'
+            password: '{{ vcenter_cred.json.Content }}'
+            vm_name: "{{ var_hostname }}"
+          register: vm_info
+          failed_when: false
+
+        # store datacenter name and ip address
+        - name: Set datacenter name and ip address
+          ansible.builtin.set_fact:
+            var_datacenter: "{{ vm_info.virtual_machines[0].datacenter }}"
+
+        - name: Initialize disks_to_add
+          ansible.builtin.set_fact:
+            disks_to_add: []
+
+        - name: Build list of disks dynamically
+          ansible.builtin.set_fact:
+            disks_to_add: "{{ disks_to_add + [ {
+              'size_gb': vars['var_disk' ~ (item|string) ~ '_size_gb'],
+              'type': 'thin',
+              'unit_number': item,
+              'controller_type': 'paravirtual',
+              'controller_number': 0,
+              'datastore': datastore_name,
+              'state': 'present'
+            } ] }}"
+          loop: "{{ range(2, var_disk_count | int + 1) | list }}"
+          when: vars['var_disk' ~ (item|string) ~ '_size_gb'] | string | length > 0
+
+        - name: Add all disks in one go
+          community.vmware.vmware_guest_disk:
+            hostname: '{{ var_vcenter_host | default() }}'
+            username: '{{ var_vcenter_username | default() }}'
+            password: '{{ vcenter_cred.json.Content }}'
+            name: "{{ var_hostname }}"
+            datacenter: "{{ var_datacenter | default() }}"
+            disk: "{{ disks_to_add | default() }}"
+
+        # Update ServiceTheater
+        - name: "ServiceTheater Update for all tasks in Disk addition"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Disk addition"
+              - "status_msg         : Additional disks have been added to VM - {{ var_hostname }}"
+              - "status             : Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+      rescue:
+
+        # Update ServiceTheater if any task failed in the disk addition
+        - name: "ServiceTheater Failure Update for all tasks in disk addition block"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        # Fail the playbook if any task failed in the playbook
+        - name: Failing the playbook if any task failed in the disk addition block
+          ansible.builtin.fail:
+            msg: "Error during playbook execution please check the respective failed task for more information"

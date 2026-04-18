@@ -1,0 +1,149 @@
+---
+- name: Linux VM Provisioning
+  hosts: localhost
+  gather_facts: true
+  no_log: false
+  vars_files:
+    - var_list_rhel.yml
+  vars:
+    target_datastore: "{{ vm_datastore }}"
+    cluster_name: "{{ CLUSTER }}"
+    storage_policy: "{{ storage_policy }}"
+  tasks:
+    - name: Get vcenter credentials from cyberark
+      ansible.builtin.uri:
+        url: https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{
+          app_id_vcenter | default() }}&username={{ var_vcenter_username |
+          default() }}
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: vcenter_cred
+      no_log: true
+    - name: Create Linux VM
+      block:
+        - name: Clone the Virtual Machine
+          community.vmware.vmware_guest:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            name: "{{ var_hostname }}"
+            state: present
+            template: "{{ template_name | default() }}"
+            datacenter: "{{ datacenter_name | default() }}"
+            datastore: "{{ target_datastore | default() }}"
+            folder: "{{ folder_name | default() }}"
+            cluster: "{{ cluster_name | default() }}"
+            resource_pool: "{{ resource_pool | default() }}"
+            wait_for_customization: true
+            networks:
+              - name: "{{ var_vmnetwork }}"
+                ip: "{{ var_ipadd }}"
+                netmask: "{{ var_netmask }}"
+                gateway: "{{ var_dftgtw }}"
+            hardware:
+              num_cpus: "{{ var_num_cpus }}"
+              memory_mb: "{{ var_memory_mb }}"
+              hotadd_memory: true
+            disk:
+              - size_gb: "{{ var_disk1_size_gb }}"
+                type: thin
+                datastore: "{{ target_datastore | default() }}"
+            customization:
+              hostname: "{{ var_hostname }}"
+              domain: "{{ var_domain | default() }}"
+              dns_servers:
+                - "{{ var_dns1 | default() }}"
+                - "{{ var_dns2 | default() }}"
+              timezone: UTC
+          register: vm_clone_info
+        - name: Check VM clone status
+          ansible.builtin.debug:
+            var: vm_clone_info.changed
+        - name: Wait for Linux server to boot and become available in network
+          ansible.builtin.wait_for:
+            timeout: 120
+          delegate_to: localhost
+        - name: Power on my VM
+          community.vmware.vmware_guest_powerstate:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            name: "{{ var_hostname }}"
+            datacenter: "{{ datacenter_name | default() }}"
+            state: powered-on
+        - name: Add new network adapter
+          community.vmware.vmware_guest_network:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name | default() }}"
+            name: "{{ var_hostname }}"
+            state: present
+            label: Network adapter 1
+            network_name: "{{ var_vmnetwork | default() }}"
+            connected: true
+            start_connected: true
+        - name: Gather VM info
+          community.vmware.vmware_vm_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            vm_name: "{{ var_hostname }}"
+          register: vm_info
+        - name: Set esxi host info
+          ansible.builtin.set_fact:
+            hw_esxi_host: "{{ vm_clone_info.instance.hw_esxi_host }}"
+        - name: Set storage policy based on ESXi
+          ansible.builtin.set_fact:
+            final_storage_policy: "{{ storage_policy | regex_replace('^DEF2', 'DEF8') if
+              (hw_esxi_host | lower is match('^def8')) else storage_policy }}"
+        - name: Debug
+          ansible.builtin.debug:
+            msg: "{{ final_storage_policy | default() }}"
+        - name: Enforce storage policy for VM_Home using name
+          community.vmware.vmware_guest_storage_policy:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            name: "{{ var_hostname }}"
+            vm_home: "{{ final_storage_policy | default() }}"
+          delegate_to: localhost
+        - name: Enforce Storage policy for disk 0 and 1 using UUID
+          community.vmware.vmware_guest_storage_policy:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            uuid: "{{ vm_info.virtual_machines[0].uuid }}"
+            disk:
+              - unit_number: 0
+                policy: "{{ final_storage_policy | default() }}"
+          delegate_to: localhost
+          register: policy_status
+          ignore_errors: true
+        - name: Debug
+          ansible.builtin.debug:
+            msg:
+              IP_ADDR: "{{ var_ipadd | default() }}"
+        - name: ServiceTheater Update for all tasks in VM clone
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Check VM clone status"
+              - "status_msg         : The {{ var_hostname }} clone has been
+                completed"
+              - "status             : Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+      rescue:
+        - name: ServiceTheater Failure Update for all tasks in VM clone block
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+        - name: Failing the playbook if any task failed in the VM clone creation block
+          ansible.builtin.fail:
+            msg: Error during playbook execution please check the respective failed task for
+              more information

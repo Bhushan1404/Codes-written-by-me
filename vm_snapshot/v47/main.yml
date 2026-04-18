@@ -1,0 +1,171 @@
+---
+- name: Create Snapshot for VCenter VM
+  hosts: localhost
+  gather_facts: true
+  ignore_errors: true
+  vars:
+    vm_names: "{{ precheck_pass }}"
+    successful_snapshots: []
+  vars_files:
+    - var_list_linux.yml
+  tasks:
+    - name: Get vcenter credentials from cyberark
+      ansible.builtin.uri:
+        url: https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{
+          app_id_vcenter | default() }}&username={{ var_vcenter_username |
+          default() }}
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: vcenter_cred
+    - name: Gathering info for vm for snapshot
+      block:
+        - name: Gather only registered virtual machines
+          community.vmware.vmware_vm_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            vm_name: "{{ vm_names }}"
+            validate_certs: false
+          register: vminfo
+        - name: Check VMs availability and set UUIDs
+          ansible.builtin.set_fact:
+            datacenter_name: "{{ vminfo.virtual_machines.0.datacenter}}"
+            vm_uuids: "{{ vminfo.virtual_machines.0.uuid }}"
+        - name: Debug if no VMs are found
+          ansible.builtin.debug:
+            msg: Fail VMs found in VCenter matching the provided names
+          failed_when: vm_uuids is not defined or vm_uuids | length == 0
+        - name: Meta
+          ansible.builtin.meta: end_play
+          when: vm_uuids is not defined or vm_uuids | length == 0
+        - name: Create a mapping of UUIDs to their server names
+          ansible.builtin.set_fact:
+            uuid_to_name: "{{ uuid_to_name | default({}) | combine({item.uuid:
+              item.guest_name}) }}"
+          loop: "{{ vminfo.virtual_machines }}"
+          when: item.guest_name in vm_names
+        - name: Gather Memory info from each guest VM
+          community.vmware.vmware_guest_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            validate_certs: false
+            datacenter: "{{ datacenter_name }}"
+            uuid: "{{ vm_uuids | default() }}"
+            schema: vsphere
+            properties:
+              - config.hardware.memoryMB
+          delegate_to: localhost
+          register: vm_info
+          ignore_errors: true
+        - name: Set fact for vm memory
+          ansible.builtin.set_fact:
+            vm_mems: "{{ vm_info.instance.config.hardware.memoryMB }}"
+        - name: Gather Disk facts for each VM
+          community.vmware.vmware_guest_disk_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name }}"
+            uuid: "{{ vm_uuids | default() }}"
+            validate_certs: false
+          delegate_to: localhost
+          register: disk_fact
+          ignore_errors: true
+        - name: Set datastore names for each VM
+          ansible.builtin.set_fact:
+            ds_names: "{{ disk_fact.guest_disk_info['0'].backing_datastore }}"
+        - name: Gather info from datacenter about each datastore
+          community.vmware.vmware_datastore_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name }}"
+            name: "{{ ds_names | default() }}"
+            validate_certs: false
+          delegate_to: localhost
+          register: info
+          ignore_errors: true
+        - name: Setfact of ds_frees
+          ansible.builtin.set_fact:
+            ds_frees: "{{ ((info.datastores.0.freeSpace/info.datastores.0.capacity)*100) }}"
+        - name: Check DataStore Free space
+          ansible.builtin.fail:
+            msg: "{{ ds_names | default() }} Datastore free space is less than 20%, skipping
+              the Create VM snapshot task"
+          when: ds_frees | int < 20
+        - name: Initialize a list for successful snapshots
+          ansible.builtin.set_fact:
+            successful_snapshots: []
+        - name: Initialize snapshot name
+          ansible.builtin.set_fact:
+            snapshot_name: snapshot-PT-BKUP-{{ lookup('pipe', 'date -d "now"
+              +"%m%d%y-%H%M%S"') }}
+        - name: Take snapshots of VMs without memory flag when greater than 20% space
+          community.vmware.vmware_guest_snapshot:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name }}"
+            uuid: "{{ vm_uuids | default() }}"
+            state: present
+            snapshot_name: "{{ snapshot_name | default() }}"
+            quiesce: false
+            memory_dump: true
+            validate_certs: false
+          delegate_to: localhost
+          when: vm_info.instance.config.hardware.memoryMB | int < 16384 and ds_frees | int
+            >= 20
+          register: snapshot_result
+          ignore_errors: true
+        - name: Debug  # noqa: no-handler
+          ansible.builtin.debug:
+            msg:
+              patch_hosts: "{{ vm_names | default() }}"
+          when: snapshot_result.changed | default(false)
+        - name: Take snapshots of VMs without memory flag when less than 20% space
+          community.vmware.vmware_guest_snapshot:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            datacenter: "{{ datacenter_name }}"
+            uuid: "{{ vm_uuids | default() }}"
+            state: present
+            snapshot_name: "{{ snapshot_name | default() }}"
+            quiesce: false
+            memory_dump: false
+            validate_certs: false
+          delegate_to: localhost
+          when: vm_info.instance.config.hardware.memoryMB | int > 16384 and ds_frees | int
+            >= 20
+          register: snapshot_result2
+          no_log: true
+          ignore_errors: true
+        - name: Debug  # noqa: no-handler
+          ansible.builtin.debug:
+            msg:
+              patch_hosts: "{{ vm_names | default() }}"
+          when: snapshot_result2.changed | default(false)
+        - name: ServiceTheatre success update
+          ansible.builtin.debug:
+            msg:
+              - "target_host : {{ patch_hosts | default() }}"
+              - "task_name : VM Snapshot"
+              - status_msg: >
+                  Snapshot is successfully saved for - "{{ vm_names | default() }}"
+
+                  Snapshot name - "{{ snapshot_name | default() }}"
+
+                  Snapshot is failed/skipped for - {{ failed_snapshot | default() }}
+              - "status : Success"
+              - "execution_date_time : {{ ansible_date_time.iso8601 }}"
+      rescue:
+        - name: ServiceTheatre failure update
+          ansible.builtin.debug:
+            msg:
+              - "target_host         : {{ vm_names | default() }}"
+              - "failed_task_name    : {{ ansible_failed_task.name }}"
+              - "status_msg          : {{ ansible_failed_result.msg }}"
+              - "status : Failed"
+              - "execution_date_time  : {{ ansible_date_time.iso8601 }}"

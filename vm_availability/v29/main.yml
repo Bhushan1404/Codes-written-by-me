@@ -1,0 +1,81 @@
+---
+- name: Check VM Availability in vCenter
+  hosts: localhost
+  gather_facts: true
+  vars:
+    vm_name: "{{ vm_name }}"
+    unavailable_vms: []
+    available_vms: []
+  vars_files:
+    - var_list_linux.yml
+  tasks:
+    - name: Get vcenter credentials from cyberark
+      ansible.builtin.uri:
+        url: https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{
+          app_id_vcenter | default() }}&username={{ var_vcenter_username |
+          default() }}
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: vcenter_cred
+      no_log: true
+    - name: Checking whether VM is available in Vcentre and is Poweredon
+      block:
+        - name: Get list of VMs in vCenter
+          community.vmware.vmware_vm_info:
+            hostname: "{{ var_vcenter_host | default() }}"
+            username: "{{ var_vcenter_username | default() }}"
+            password: "{{ vcenter_cred.json.Content }}"
+            vm_name: "{{ vm_name }}"
+            validate_certs: false
+          register: vm_info
+          ignore_errors: true
+          no_log: true
+        - name: Build list of available vms
+          ansible.builtin.set_fact:
+            available_vms: "{{ available_vms + [item.guest_name] }}"
+          loop: "{{ vm_info.virtual_machines }}"
+          when:
+            - item.guest_name is defined
+            - item.guest_name in vm_name
+            - item.power_state == 'poweredOn'
+          no_log: true
+        - name: Build list of unavailable vms
+          ansible.builtin.set_fact:
+            unavailable_vms: "{{ unavailable_vms + [item.guest_name] }}"
+          loop: "{{ vm_info.virtual_machines }}"
+          when:
+            - item.guest_name is defined
+            - item.guest_name in vm_name
+            - item.power_state != 'poweredOn'
+          no_log: true
+        - name: Convert list to comma-separated string
+          ansible.builtin.set_fact:
+            formatted_vm: "{{ available_vms | default() }}"
+        - name: Debug
+          ansible.builtin.debug:
+            msg:
+              formatted_vms: "{{ formatted_vm | default() }}"
+        - name: Debug unavailable vms
+          ansible.builtin.set_fact:
+            unavailable_vms: "{{ unavailable_vms | default() }}"
+        - name: ServiceTheatre success update
+          ansible.builtin.debug:
+            msg:
+              - "target_host : {{ vm_name | default() }}"
+              - "task_name : VM Availability"
+              - >
+                "status_msg : Available in VCentre and is poweredOn - {{
+                formatted_vm | default() }} "
+                              PoweredOff/Unavailable VM in VCenter - {{ unavailable_vms | default() }}"
+              - "status : Success"
+              - "execution_date_time : {{ ansible_date_time.iso8601 }}"
+      rescue:
+        - name: ServiceTheatre failure update
+          ansible.builtin.debug:
+            msg:
+              - "target_host         : {{ vm_name | default() }}"
+              - "failed_task_name    : {{ ansible_failed_task.name }}"
+              - "status_msg          : {{ ansible_failed_result.msg }}"
+              - "status              : Failed"
+              - "execution_date_time : {{ ansible_date_time.iso8601 }}"

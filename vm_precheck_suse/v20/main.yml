@@ -1,0 +1,630 @@
+---
+- name: Create dynaic inventory
+  hosts: localhost
+  gather_facts: true
+  vars:
+    nodelist: "{{ formatted_vms }}"
+  vars_files:
+    - var_list_linux.yml
+  tasks:
+    - name: Add host to group
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        group: temphost
+      with_items: "{{ nodelist }}"
+      delegate_to: localhost
+    - name: Get HOST credentials from cyberark
+      ansible.builtin.uri:
+        url: https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{
+          app_id_vcenter | default() }}&username=qa-awxlogin
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: host_cred
+      no_log: true
+    - name: Set connection variable dynamically
+      ansible.builtin.set_fact:
+        dynamic_user: "{{ host_cred.json.UserName }}"
+        dynamic_pass: "{{ host_cred.json.Content }}"
+      no_log: true
+- name: Fetching Precheck data
+  hosts: temphost
+  become: true
+  gather_facts: true
+  ignore_unreachable: true
+  vars:
+    ansible_user: "{{ hostvars['localhost'] ['dynamic_user'] | default() }}"
+    ansible_password: "{{ hostvars['localhost'] ['dynamic_pass'] | default() }}"
+  tasks:
+    - name: Initiate task failure
+      ansible.builtin.set_fact:
+        fail_reason: []
+        precheck_allowed: false
+    - name: Check if host is reachable
+      ansible.builtin.command: whoami
+      register: ssh_test
+      changed_when: false
+      ignore_unreachable: true
+      ignore_errors: true
+    - name: Set unreachable Reason
+      ansible.builtin.set_fact:
+        fail_reason: "{{ fail_reason | default() + ['SSH Failed: '~ (ssh_test.msg |
+          default(ssh_test.stderr, true)| default('Unknown Error'))] }}"
+      when: ssh_test is failed or ssh_test.unreachable is defined
+    - name: Check if server is SUSE
+      ansible.builtin.command: cat /etc/os-release
+      register: os_release
+      when: fail_reason | length == 0
+      changed_when: false
+      ignore_errors: true
+    - name: Fail if server is not suse
+      ansible.builtin.set_fact:
+        fail_reason: "{{ fail_reason + ['Server is not SUSE'] }}"
+      when:
+        - fail_reason | length == 0
+        - os_release.stdout is not search('^ID="sles"?', multiline=True)
+    - name: Allow prechecks
+      ansible.builtin.set_fact:
+        precheck_allowed: true
+      when: fail_reason | length == 0
+    - name: Gather facts
+      ansible.builtin.setup: null
+      register: setup_status
+      changed_when: false
+      no_log: true
+    - name: Prechecks are under process
+      when: precheck_allowed
+      block:
+        - name: To fetch the hostname of server
+          ansible.builtin.debug:
+            msg: "{{ ansible_facts.hostname }}"
+          register: hostnmae_op
+        - name: Set hostname failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['Hostname task failed: ' ~
+              (hostnmae_op.msg |default(hostnmae_op.stderr, true) |
+              default('Unknown Error'))] }}"
+          when: hostnmae_op.failed
+        - name: To fetch the date
+          ansible.builtin.command: date
+          register: date_op
+          changed_when: false
+        - name: Set date failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['date task failed: ' ~ (date_op.msg
+              |default(date_op.stderr, true) | default('Unknown Error'))] }}"
+          when: date_op.failed
+        - name: To fetch the uptime of server
+          ansible.builtin.command: uptime
+          register: uptime_op
+          changed_when: false
+        - name: Set Uptime failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['Uptime task failed: ' ~
+              (uptime_op.msg |default(uptime_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: uptime_op.failed
+        - name: To fetch the current kernel version
+          ansible.builtin.command: uname -r
+          register: uname_op
+          changed_when: false
+        - name: Set Kernel failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['Kernel Check task failed: ' ~
+              (uname_op.msg |default(uname_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: uname_op.failed
+        - name: Check /var/usage
+          ansible.builtin.shell: |
+            set -o pipefail
+            df -h /var | awk 'NR==2 {print $5}' | tr -d '%'
+          register: var_usage
+          ignore_errors: true
+          changed_when: false
+        - name: Fail if /var > 10%
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['Disk usage for /var is above
+              threshold: ' ~ var_usage.stdout ~ '%'] }}"
+          when:
+            - var_usage.rc == 0
+            - (var_usage.stdout | int) > 10
+        - name: Handle /var check error
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason + ['/var usage check failed'] }}"
+          when: var_usage.failed
+        - name: To check the grub file
+          ansible.builtin.shell: |
+            set -o pipefail
+            #!/bin/bash
+            FILES=("/etc/grub2.cfg" "/etc/grub.conf")
+            for FILE in "${FILES[@]}"; do
+               if [ -f "$FILE" ]; then
+                  echo "$FILE exists."
+                cat "$FILE" | grep -v "^#"
+                else
+                  echo "$FILE does not exist."
+                fi
+            done
+          register: grub_op
+          changed_when: false
+        - name: Gather grub file info failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['grub file task failed: ' ~
+              (grub_op.msg |default(grub_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: grub_op.failed
+        - name: Kernel interface table
+          ansible.builtin.command: ss -in
+          register: netstat_op
+          changed_when: false
+        - name: Check kernel interface  failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['check kernel interface task failed:
+              ' ~ (netstat_op.msg |default(netstat_op.stderr, true) |
+              default('Unknown Error'))] }}"
+          when: netstat_op.failed
+        - name: Kernel routing table
+          ansible.builtin.command: ss -rn
+          register: netstat_rn_op
+          changed_when: false
+        - name: Check kernel routing failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['kernel routing task failed: ' ~
+              (netstat_rn_op.msg |default(netstat_rn_op.stderr, true) |
+              default('Unknown Error'))] }}"
+          when: netstat_rn_op.failed
+        - name: Filesystem mount details
+          ansible.builtin.command: findmnt
+          register: mount_op
+          changed_when: false
+        - name: Mount command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['mount task failed: ' ~
+              (mount_op.msg |default(mount_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: mount_op.failed
+        - name: To display pvs
+          ansible.builtin.command: pvs
+          register: pvs_op
+          changed_when: false
+        - name: PVS command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['pvs task failed: ' ~ (pvs_op.msg
+              |default(pvs_op.stderr, true) | default('Unknown Error'))] }}"
+          when: pvs_op.failed
+        - name: To display vgs
+          ansible.builtin.command: vgs
+          register: vgs_op
+          changed_when: false
+        - name: VGS command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['vgs task failed: ' ~ (vgs_op.msg
+              |default(vgs_op.stderr, true) | default('Unknown Error'))] }}"
+          when: vgs_op.failed
+        - name: To display lvs
+          ansible.builtin.command: lvs
+          register: lvs_op
+          changed_when: false
+        - name: LVS command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['lvs task failed: ' ~ (lvs_op.msg
+              |default(lvs_op.stderr, true) | default('Unknown Error'))] }}"
+          when: lvs_op.failed
+        - name: To display server IP/loopback ip
+          ansible.builtin.command: ip a
+          register: ip_op
+          changed_when: false
+        - name: Server Ip failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['server IP/loopback task failed: ' ~
+              (ip_op.msg |default(ip_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: ip_op.failed
+        - name: Runnig pvdisplay command
+          ansible.builtin.command: pvdisplay
+          register: pvdisplay_op
+          changed_when: false
+        - name: Pvdisplay command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['pvdisplay task failed: ' ~
+              (pvdisplay_op.msg |default(pvdisplay_op.stderr, true) |
+              default('Unknown Error'))] }}"
+          when: pvdisplay_op.failed
+        - name: Running vgdisplay command
+          ansible.builtin.command: vgdisplay
+          register: vgdisplay_op
+          changed_when: false
+        - name: Vgdisplay command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['vgdisplay task failed: ' ~
+              (vgdisplay_op.msg |default(vgdisplay_op.stderr, true) |
+              default('Unknown Error'))] }}"
+          when: vgdisplay_op.failed
+        - name: Running lvdisplay command
+          ansible.builtin.command: lvdisplay
+          register: lvdisplay_op
+          changed_when: false
+        - name: Lvdisplay command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['lvdisplay task failed: ' ~
+              (lvdisplay_op.msg |default(lvdisplay_op.stderr, true) |
+              default('Unknown Error'))] }}"
+          when: lvdisplay_op.failed
+        - name: Running ss -a command
+          ansible.builtin.command: ss -a
+          register: nets_op
+          changed_when: false
+        - name: Gather ss -a  command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['netstat -a  task failed: ' ~
+              (nets_op.msg |default(nets_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: nets_op.failed
+        - name: Running ss -pl command
+          ansible.builtin.command: ss -pl
+          register: nets_pl_op
+          changed_when: false
+        - name: Gather ss -pl command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['netstat -pl task failed: ' ~
+              (nets_pl_op.msg |default(nets_pl_op.stderr, true) |
+              default('Unknown Error'))] }}"
+          when: nets_pl_op.failed
+        - name: Running ss -r command
+          ansible.builtin.command: ss -r
+          register: nets_r_op
+          changed_when: false
+        - name: Gather ss -r command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['netstat -r task failed: ' ~
+              (nets_r_op.msg |default(nets_r_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: nets_r_op.failed
+        - name: Running blkid command
+          ansible.builtin.command: blkid
+          register: blkid_op
+          changed_when: false
+        - name: BLKID command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['blkid task failed: ' ~
+              (blkid_op.msg |default(blkid_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: blkid_op.failed
+        - name: Running lsblk command
+          ansible.builtin.command: lsblk
+          register: lsblk_op
+          changed_when: false
+        - name: LSBLK command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['lsblk task failed: ' ~
+              (lsblk_op.msg |default(lsblk_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: lsblk_op.failed
+        - name: Total process running
+          ansible.builtin.command: ps -ef
+          register: ps_op
+          changed_when: false
+        - name: Process command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['ps -ef task failed: ' ~ (ps_op.msg
+              |default(ps_op.stderr, true) | default('Unknown Error'))] }}"
+          when: ps_op.failed
+        - name: Database checkup
+          when: inventory_hostname is search('(?i)SD26')
+          block:
+            - name: Ps -ef | egrep "pmon|tns"
+              ansible.builtin.shell: |
+                set -o pipefail
+                ps -ef | egrep "pmon|tns"
+              register: ps_tns_op
+              changed_when: false
+            - name: Ps -ef | egrep "pmon|tns" command failure
+              ansible.builtin.set_fact:
+                fail_reason: "{{ fail_reason | default() + ['ps -ef egrep pmon|tns  task failed:
+                  ' ~ (ps_tns_op.msg |default(lvdisplay_op.stderr, true) |
+                  default('Unknown Error'))] }}"
+              when: ps_tns_op.failed
+        - name: Display fstab entries
+          ansible.builtin.shell: |
+            set -o pipefail
+            cat /etc/fstab |grep -v "^#"
+          register: fstab_op
+          changed_when: false
+        - name: FSTAB command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['fstab task failed: ' ~
+              (fstab_op.msg |default(fstab_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: fstab_op.failed
+        - name: Display Filesysetm
+          ansible.builtin.command: df -hT
+          register: df_op
+          changed_when: false
+        - name: Filesystem command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['df -hT task failed: ' ~ (df_op.msg
+              |default(df_op.stderr, true) | default('Unknown Error'))] }}"
+          when: df_op.failed
+        - name: Display filesystem word count
+          ansible.builtin.shell: |
+            set -o pipefail
+            df -hT | wc -l
+          register: dfwc_op
+          changed_when: false
+        - name: Filesystem word count command failure
+          ansible.builtin.set_fact:
+            fail_reason: "{{ fail_reason | default() + ['df -hT | wc -l task failed: ' ~
+              (dfwc_op.msg |default(dfwc_op.stderr, true) | default('Unknown
+              Error'))] }}"
+          when: dfwc_op.failed
+    - name: Register Summary
+      ansible.builtin.set_fact:
+        summary: "{{ inventory_hostname.ljust(30) }} | {{ 'Precheck is completed
+          successfully' if (fail_reason | length == 0) else (fail_reason |
+          join('; ') | regex_replace('\\n', ' ') | regex_replace('\\s+', ' '))
+          }}"
+    - name: Ensure PT log directory exists
+      ansible.builtin.file:
+        path: /tmp/PT/precheck_logs
+        state: directory
+        mode: "0755"
+    - name: Generate timestamp
+      ansible.builtin.set_fact:
+        precheck_timestamp: "{{ ansible_date_time.date }}_{{ ansible_date_time.time |
+          regex_replace(':', '-') }}"
+    - name: Initialize txt file generated
+      ansible.builtin.set_fact:
+        txt_file_generated: false
+    - name: Save details of precheck in file
+      ansible.builtin.copy:
+        dest: /tmp/PT/precheck_logs/{{ inventory_hostname }}_precheck_log_{{
+          precheck_timestamp | default() }}.txt
+        mode: "0644"
+        content: >
+          "Hostname:
+          {{ ansible_facts.hostname | default() | default('FAILED: Not gathered') }}
+          -----------------------------------------------------------------------------------------------------------------------
+          Date:
+          {% if date_op.rc == 0 %}
+          {{ date_op.stdout }}
+          {% else %}
+          FAILED: {{ date_op.stderr | default() }}
+          {% endif %}
+          ----------------------------------------------------------------------------------------------------------------------
+          Uptime:
+          {% if uptime_op.rc == 0 %}
+          {{ uptime_op.stdout }}
+          {% else %}
+          FAILED: {{ uptime_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          Kernel:
+          {% if uname_op.rc == 0 %}
+          {{ uname_op.stdout }}
+          {% else %}
+          FAILED: {{ uname_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          Grub File Content:
+          {% if grub_op.rc == 0 %}
+          {{ grub_op.stdout }}
+          {% else %}
+          FAILED: {{ grub_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          Netstat Kernel interface table:
+          {% if netstat_op.rc == 0 %}
+          {{ netstat_op.stdout }}
+          {% else %}
+          FAILED: {{ netstat_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          Netstat Kernel routing table:
+          {% if netstat_rn_op.rc == 0 %}
+          {{ netstat_rn_op.stdout }}
+          {% else %}
+          FAILED: {{ netstat_rn_op.stderr | default() }}
+          {% endif %}
+          ----------------------------------------------------------------------------------------------------------------------
+          Filesystem mount details:
+          {% if mount_op.rc == 0 %}
+          {{ mount_op.stdout }}
+          {% else %}
+          FAILED: {{ mount_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          PVS Details:
+          {% if pvs_op.rc == 0 %}
+          {{ pvs_op.stdout }}
+          {% else %}
+          FAILED: {{ pvs_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          VGS Details:
+          {% if vgs_op.rc == 0 %}
+          {{ vgs_op.stdout }}
+          {% else %}
+          FAILED: {{ vgs_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          LVS Details:
+          {% if lvs_op.rc == 0 %}
+          {{ lvs_op.stdout }}
+          {% else %}
+          FAILED: {{ lvs_op.stderr | default() }}
+          {% endif %}
+          ----------------------------------------------------------------------------------------------------------------------
+          IP Details:
+          {% if ip_op.rc == 0 %}
+          {{ ip_op.stdout }}
+          {% else %}
+          FAILED: {{ ip_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          PVDISPLAY Details:
+          {% if pvdisplay_op.rc == 0 %}
+          {{ pvdisplay_op.stdout }}
+          {% else %}
+          FAILED: {{ pvdisplay_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          VGDISPLAY Details:
+          {% if vgdisplay_op.rc == 0 %}
+          {{ vgdisplay_op.stdout }}
+          {% else %}
+          FAILED: {{ vgdisplay_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          LVDISPLAY Details:
+          {% if lvdisplay_op.rc == 0 %}
+          {{ lvdisplay_op.stdout }}
+          {% else %}
+          FAILED: {{ lvdisplay_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          netstat -a Details:
+          {% if nets_op.rc == 0 %}
+          {{ nets_op.stdout }}
+          {% else %}
+          FAILED: {{ nets_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          netstat -pl Details:
+          {% if nets_pl_op.rc == 0 %}
+          {{ nets_pl_op.stdout }}
+          {% else %}
+          FAILED: {{ nets_pl_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          netstat -r Details:
+          {% if nets_r_op.rc == 0 %}
+          {{ nets_r_op.stdout }}
+          {% else %}
+          FAILED: {{ nets_r_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          BLKID Details:
+          {% if blkid_op.rc == 0 %}
+          {{ blkid_op.stdout }}
+          {% else %}
+          FAILED: {{ blkid_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          LSBLK Details:
+          {% if lsblk_op.rc == 0 %}
+          {{ lsblk_op.stdout }}
+          {% else %}
+          FAILED: {{ lsblk_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          Running process Details:
+          {% if ps_op.rc == 0 %}
+          {{ ps_op.stdout }}
+          {% else %}
+          FAILED: {{ ps_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          pmon and tns process:
+          {% if inventory_hostname is search('(?i)SD26') %}
+            {% if ps_tns_op.rc == 0 %}
+          {{ ps_tns_op.stdout | default() }}
+            {% else %}
+          FAILED: {{ ps_tns_op.stderr | default() | default('Database Not present') }}
+            {% endif %}
+          {% else %}
+            SKIPPED (There is no Database on the server)
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          FSTAB FILE Details:
+          {% if fstab_op.rc == 0 %}
+          {{ fstab_op.stdout }}
+          {% else %}
+          FAILED: {{ fstab_op.stderr | default() }}
+          {% endif %}
+          ----------------------------------------------------------------------------------------------------------------------
+          Filesystem Details:
+          {% if df_op.rc == 0 %}
+          {{ df_op.stdout }}
+          {% else %}
+          FAILED: {{ df_op.stderr | default() }}
+          {% endif %}
+          -----------------------------------------------------------------------------------------------------------------------
+          Filesystem Word Count:
+          {% if dfwc_op.rc == 0 %}
+          {{ dfwc_op.stdout }}
+          {% else %}
+          FAILED: {{ dfwc_op.stderr | default() }}
+          {% endif %}
+          -------------------------------------------------------------------------------------------------------------------------"
+      ignore_errors: true
+      register: precheck_file
+      when: precheck_allowed
+    - name: Delete logs older than 1 day
+      ansible.builtin.command: find /tmp/PT/precheck_logs -type f -mtime +1 -delete
+      changed_when: false
+      when:
+        - precheck_file is succeeded
+        - precheck_file.changed
+        - precheck_allowed
+    - name: Mark hosts as successfull.
+      ansible.builtin.set_fact:
+        txt_file_generated: true
+      when:
+        - precheck_file is succeeded
+        - precheck_file.changed
+- name: Display final passed servers
+  hosts: localhost
+  gather_facts: true
+  vars:
+    successful_servers: []
+    failed_servers: []
+    failure_details: []
+  tasks:
+    - name: Build list of successfullservers
+      ansible.builtin.set_fact:
+        successful_servers: "{{ successful_servers + [item] }}"
+      loop: "{{ groups['temphost'] | default() }}"
+      when:
+        - hostvars[item].txt_file_generated | default(false)
+    - name: Build list of failed servers
+      ansible.builtin.set_fact:
+        failed_servers: "{{ failed_servers + [item] }}"
+      loop: "{{ groups['temphost'] | default() }}"
+      when:
+        - not hostvars[item].txt_file_generated | default(false)
+    - name: Build failure details
+      ansible.builtin.set_fact:
+        failure_details: "{{ failure_details + [ item ~ ' ~> '~
+          (hostvars[item].fail_reason | join('; ')) ] }}"
+      loop: "{{ failed_servers }}"
+      when: failed_servers | length > 0
+    - name: Debug
+      ansible.builtin.debug:
+        msg:
+          precheck_pass: "{{ successful_servers | default([]) | join(',') }}"
+    - name: ServiceTheatre success update
+      ansible.builtin.debug:
+        msg:
+          - "target_host : {{ groups['temphost'] | join(',') }}"
+          - "task_name : Precheck playbook for SUSE"
+          - status_msg: >
+              Prechecks sucessfully completed for servers - {{ successful_servers
+              | default([]) | join(',') }}
+
+              Location - /tmp/PT/precheck_logs/server_name_precheck_log_date_time.txt
+
+              Prechecks failed for servers - {{ failed_servers | default([]) | join(',') }}
+          - "status : Success"
+          - "execution_date_time : {{ ansible_date_time.iso8601 }}"
+      when:
+        - successful_servers | length > 0
+    - name: ServiceTheatre failure update
+      ansible.builtin.debug:
+        msg:
+          - "target_host  : {{ groups['temphost'] | join(',') }}"
+          - "task_name : Precheck playbook for SUSE"
+          - "status_msg   : None of the servers prechecks was completed"
+          - "status : Failed"
+          - "execution_date_time : {{ ansible_date_time.iso8601 }}"
+      when:
+        - successful_servers | length == 0

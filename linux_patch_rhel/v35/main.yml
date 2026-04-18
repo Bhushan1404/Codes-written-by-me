@@ -1,0 +1,298 @@
+---
+- name: Patch Red Hat-based VMs
+  hosts: localhost
+  vars:
+    p_nodelist: "{{ patch_hosts }}"
+  tasks:
+    - name: Add host to dynamic inventory
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        group: temphost
+      with_items: "{{ p_nodelist }}"
+      delegate_to: localhost
+    - name: Get HOST credentials from cyberark
+      ansible.builtin.uri:
+        url: https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{
+          app_id_vcenter | default() }}&username=qa-awxlogin
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: host_cred
+      no_log: true
+    - name: Set connection variable dynamically
+      ansible.builtin.set_fact:
+        dynamic_user: "{{ host_cred.json.UserName }}"
+        dynamic_pass: "{{ host_cred.json.Content }}"
+      no_log: true
+- name: This Playbook will update the server with latest patches
+  hosts: temphost
+  gather_facts: true
+  become: true
+  vars:
+    ansible_user: "{{ hostvars['localhost'] ['dynamic_user'] | default() }}"
+    ansible_password: "{{ hostvars['localhost'] ['dynamic_pass'] | default() }}"
+  tasks:
+    - name: Setup
+      ansible.builtin.setup: null
+      register: setup
+    - name: Checking current kernel version of host before patching
+      ansible.builtin.command: uname -r
+      register: kernel_before_patch
+      changed_when: false
+    - name: Check root filesystem space
+      ansible.builtin.shell: |
+        set -o pipefail
+        df / --output=pcent | tail -n 1
+      register: disk_usage
+      changed_when: false
+    - name: Fail if root filesystem is 100% full
+      ansible.builtin.fail:
+        msg: Root filesystem is 100% full, patching cannot be performed.
+      when: disk_usage.stdout_lines == "100"
+    - name: Check connectivity between patching host and RMT server
+      ansible.builtin.wait_for:
+        host: def2-meec02
+        port: 80
+        timeout: 10
+      register: port_check
+      ignore_errors: true
+    - name: Stop if RMT and Target server Connectivity not established.
+      ansible.builtin.fail:
+        msg: "Cannot procced with patching: def2-meec02 :80 is not reachable from {{
+          inventory_hostname }}"
+      when: port_check is failed
+    - name: Backup /etc/yum.repos.d
+      ansible.builtin.copy:
+        src: /etc/yum.repos.d
+        dest: /etc/yum.repos.d.backup_{{ ansible_date_time.date }}
+        remote_src: true
+        mode: preserve
+    - name: Remove existing /etc/yum.repos.d
+      ansible.builtin.file:
+        path: /etc/yum.repos.d
+        state: absent
+    - name: Create /etc/yum.repos.d directory
+      ansible.builtin.file:
+        path: /etc/yum.repos.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+    - name: Create rhel9 repo with required content
+      ansible.builtin.copy:
+        dest: /etc/yum.repos.d/redhat9-internal.repo
+        content: >
+          ### Redhat Internal Repository  def2-meec02.itc.global.mahle ###
+
+
+          [rhel-9-internal-for-x86_64-baseos-rpms]
+
+          name = Red Hat Enterprise Linux 9 for x86_64- BaseOS (RPMs) Internal
+
+          baseurl = http://def2-meec02.itc.global.mahle/redhat-9/BaseOS
+
+          enabled = 1
+
+          gpgcheck = 0
+
+
+          [rhel-9-internal-for-x86_64-appstream-rpms]
+
+          name = Red Hat Enterprise Linux 9 for x86_64- AppStream (RPMs) Internal
+
+          baseurl = http://def2-meec02.itc.global.mahle/redhat-9/AppStream
+
+          enabled = 1
+
+          gpgcheck = 0
+        owner: root
+        group: root
+        mode: "0644"
+    - name: Checking current kernel version of the host before patching
+      ansible.builtin.command: uname -r
+      register: kernel_before_patch
+      changed_when: false
+    - name: Unset proxy variables
+      ansible.builtin.shell: |
+        set -o pipefail
+        unset HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy
+      changed_when: false
+    - name: Clean yum metadata
+      ansible.builtin.command: yum clean all
+      changed_when: false
+    - name: Get yum repolist (all repos)
+      ansible.builtin.shell: |
+        set -o pipefail
+        dnf repolist all
+      register: repolist_out
+      changed_when: false
+    - name: Fail if required internal repos are missing
+      ansible.builtin.fail:
+        msg: |
+          Required internal repositories are missing on {{ inventory_hostname }}
+          Expected repos:
+            - rhel-9-internal-for-x86_64-baseos-rpms
+            - rhel-9-internal-for-x86_64-appstream-rpms
+          Current repo list: {{ repolist_out.stdout }}
+      when: >
+        repolist_out.stdout is not
+        search("rhel-9-internal-for-x86_64-baseos-rpms") or repolist_out.stdout
+        is not search ("rhel-9-internal-for-x86_64-appstream-rpms")
+    - name: Update system using only BaseOS and Appstream
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest  # noqa package-latest
+        disablerepo: "*"
+        enablerepo:
+          - rhel-9-internal-for-x86_64-appstream-rpms
+          - rhel-9-internal-for-x86_64-baseos-rpms
+      register: yum_result
+    - name: Checking the new updated kernel version on rhel server
+      ansible.builtin.shell: |
+        set -o pipefail
+        rpm -qa | grep kernel| sort| tail -1 | awk -F- '{print $(NF -1)"-"$NF}'
+      register: new_kernel
+      changed_when: false
+    - name: Wait for server to comeback online
+      block:
+        - name: Reboot rhel server
+          ansible.builtin.reboot:
+            reboot_timeout: 300
+          register: reboot_result
+        - name: Wait for server to comeback online
+          ansible.builtin.wait_for_connection:
+            delay: 0
+            timeout: 300
+            sleep: 0
+            connect_timeout: 5
+          register: waitresult
+          until: waitresult is success
+          retries: 5
+          delay: 6
+        - name: Verify system after successful reboot
+          ansible.builtin.command: uptime
+          register: uptime_result
+          changed_when: false
+      rescue:
+        - name: Debug if server is not up
+          ansible.builtin.debug:
+            msg: "{{ inventory_hostname }} is not up after 5 retries, Kindly check the
+              server manually."
+          when: wait_result != 0
+    - name: Check if the system has rebooted successfully
+      ansible.builtin.debug:
+        msg: "System successfully rebooted. Uptime: {{ uptime_result.stdout }}"
+      when: uptime_result.stdout is defined
+    - name: Checking the updated kernel version on target hosts
+      ansible.builtin.command: uname -r
+      register: new_kernel
+      changed_when: false
+    - name: Display new kernel version of target host
+      ansible.builtin.debug:
+        msg: Latest kernel of system {{ inventory_hostname }} is {{ new_kernel.stdout }}
+    - name: Debug Successful Patched servers
+      ansible.builtin.debug:
+        msg: Server {{ inventory_hostname }} was Patched successfully without any issue
+      when:
+        - yum_result.changed
+        - reboot_result is defined
+        - uptime_result is defined
+    - name: Display patch status for the server.
+      ansible.builtin.debug:
+        msg: >-
+          {% set disk = disk_usage.stdout | regex_replace('[^0-9]', '') | int %} {%
+          if disk > 90 %}
+            Server {{ inventory_hostname }} has disk usage {{ disk_usage.stdout }}. Skipping patch due to high disk usage.
+          {% elif yum_result is failed %}
+            Server {{ inventory_hostname }} encountered an error during yum_update.
+          {% elif yum_result.changed and reboot_result is not defined %}
+            Server {{ inventory_hostname }} did not rebooted properly after patching. Manual check needed.
+          {% elif yum_result.results is defined and yum_result.results | length == 0 %}
+            Patch result msg for {{ inventory_hostname }}: {{ yum_result.msg | default() }}
+          {% else %}
+            Patch was successfully applied for {{ inventory_hostname }}
+          {% endif %}
+    - name: Remove current /etc/yum.repos.d
+      ansible.builtin.file:
+        path: /etc/yum.repos.d
+        state: absent
+      register: passed_hosts
+    - name: Restore /etc/yum.repos.d from backup
+      ansible.builtin.copy:
+        src: /etc/yum.repos.d.backup_{{ ansible_date_time.date }}/yum.repos.d
+        dest: /etc/
+        remote_src: true
+        mode: preserve
+    - name: Initiate task failure
+      ansible.builtin.set_fact:
+        repos_reverted: false
+    - name: Mark hosts as successfull.
+      ansible.builtin.set_fact:
+        repos_reverted: true
+      when:
+        - passed_hosts is succeeded
+        - passed_hosts.changed
+- name: Display final passed servers
+  hosts: localhost
+  gather_facts: true
+  vars:
+    successful_servers: []
+  tasks:
+    - name: Build list of successfullservers
+      ansible.builtin.set_fact:
+        successful_servers: "{{ successful_servers + [item] }}"
+      loop: "{{ groups['temphost'] | default() }}"
+      when:
+        - hostvars[item].repos_reverted | default(false)
+    - name: Build list of failed servers
+      ansible.builtin.set_fact:
+        failed_servers: "{{ failed_servers + [item] }}"
+      loop: "{{ groups['temphost'] | default() }}"
+      when:
+        - not hostvars[item].repos_reverted | default(false)
+    - name: Debug
+      ansible.builtin.debug:
+        msg:
+          patched_hosts: "{{ successful_servers | default([]) | join(',') }}"
+    - name: ServiceTheatre success update
+      ansible.builtin.debug:
+        msg:
+          - "target_host : {{ groups['temphost'] | join(',') }}"
+          - "task_name : patching playbook for RHEL"
+          - status_msg: >
+              Patching completed successfully on - {{ successful_servers |
+              default([]) | join(',') }}
+
+              Patching was failed on - {{ failed_servers | default([]) | join(',') }}
+          - "status : Success"
+          - "execution_date_time : {{ ansible_date_time.iso8601 }}"
+      when:
+        - successful_servers | length > 0
+    - name: ServiceTheatre failure update
+      ansible.builtin.debug:
+        msg:
+          - "target_host  : {{ groups['temphost'] | join(',') }}"
+          - "task_name : Patching playbook for RHEL"
+          - "status_msg   : None of the servers patching was completed
+            successfully"
+          - "status : Failed"
+          - "execution_date_time : {{ ansible_date_time.iso8601 }}"
+      when:
+        - successful_servers | length == 0
+- name: Send patch complaince update
+  hosts: localhost
+  gather_facts: true
+  tasks:
+    - name: Debug patch complaince
+      ansible.builtin.debug:
+        msg:
+          patch_db_patch_compliance_update:
+            - vm_name: "{{ item }}"
+            - change_number: "{{ change_number }}"
+            - kernel_version: '"{{ hostvars[item].new_kernel.stdout if
+                hostvars[item].new_kernel.stdout is defined else
+                hostvars[item].kernel_before_patch.stdout }}"'
+            - version: "9"
+            - last_patch_applied: "{{ hostvars[item].ansible_date_time.iso8601 }}"
+            - compliance: true
+      loop: "{{ groups['temphost'] | default() }}"

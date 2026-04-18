@@ -1,0 +1,100 @@
+---
+- name: Create dynamic inventory
+  hosts: localhost
+  gather_facts: false
+  vars:
+    var_ipadd: "{{ var_ipadd }}"
+
+  tasks:
+    - name: Create dynamic inventory for cluster nodes
+      ansible.builtin.add_host:
+        name: "{{ item | trim }}"
+        ansible_user: "{{ ansible_user | default() }}"
+        ansible_password: "{{ ansible_password | default() }}"
+        ansible_ssh_port: 5986
+        ansible_connection: winrm
+        ansible_winrm_server_cert_validation: ignore
+        group: temp_hosts
+      with_items: "{{ var_ipadd }}"
+
+- name: Run post-disk script on the provisioned Linux VM
+  hosts: temp_hosts
+  gather_facts: true
+  become: true
+  vars:
+    volume_label: "Data Disk"
+    ansible_winrm_proxy: ~
+
+  tasks:
+    - name: Disk formatting is in process
+      block:
+
+        # Find the first unmounted disk (excluding sda and its partitions)
+        - name: Find unmounted disks (excluding sda and its partitions)
+          ansible.builtin.shell: |
+            set -o pipefail
+            lsblk -nr -o NAME,MOUNTPOINT | awk '$2 == ""' | grep -v '^sda' | awk '{a[NR]=$1}END{print a[NR-1]}'
+          register: unmounted_disk
+          changed_when: false
+
+        # Fail if no unmounted disk is found
+        - name: Fail if no unmounted disk found
+          ansible.builtin.fail:
+            msg: "No unmounted (new) device found."
+          when: unmounted_disk.stdout == ""
+
+        # Set the detected device as a variable for later use
+        - name: Set added device variable
+          ansible.builtin.set_fact:
+            added_device: "/dev/{{ unmounted_disk.stdout }}"
+            disk_name: "{{ unmounted_disk.stdout }}"
+
+        # Create unique VG, LV, and mount point names
+        - name: Set unique VG, LV, and mount point names
+          ansible.builtin.set_fact:
+            vg_name: "vg_{{ disk_name | default() }}"
+            lv_name: "lv_{{ disk_name | default() }}"
+            mount_point: "/mnt/{{ disk_name | default() }}"
+
+        # Create a physical volume on the detected device
+        - name: Create physical volume
+          ansible.builtin.command: pvcreate "{{ added_device | default() }}"
+          register: pvcreate_result
+          changed_when: false
+
+        # Create a new volume group using the physical volume
+        - name: Create volume group
+          ansible.builtin.command: vgcreate "{{ vg_name | default() }}" "{{ added_device | default() }}"
+          register: vgcreate_result
+          changed_when: false
+
+        # Create a logical volume using all free space in the volume group
+        - name: Create logical volume
+          ansible.builtin.command: lvcreate -l 100%FREE -n "{{ lv_name | default() }}" "{{ vg_name | default() }}"
+          register: lvcreate_result
+          changed_when: false
+
+        # Show a summary of the disk setup
+        - name: Show disk setup summary
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Check Disk setup status"
+              - "status_msg         : The new disk has been initialized and formatted on server {{ inventory_hostname | default('') }} with Logical Volume: {{ lv_name | default() }}"
+              - "VG                 : {{ vg_name | default() }}"
+              - "LV                 : {{ lv_name | default() }}"
+      rescue:
+        # Show debug info if any task in the block fails
+        - name: "ServiceTheater Failure Update for all tasks in VM disk setup block"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        # Fail the playbook if any task failed in the block
+        - name: Failing the playbook if any task failed in the VM disk setup block
+          ansible.builtin.fail:
+            msg: "Error during playbook execution. Please check the respective failed task for more information."

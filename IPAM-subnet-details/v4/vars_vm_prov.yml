@@ -1,0 +1,56 @@
+---
+template_name_2019: "WINDOWS2019_Template_Latest"
+template_name_2022: "WINDOWS2022_Template_Latest"
+datacenter_name: "DEFR-DC"
+resource_pool: "ServiceTheator-RP"
+var_domain: "itc.global.mahle"
+var_dns1: "10.200.75.50"
+var_dns2: "10.22.156.90"
+ipam_username: "S0005999"
+ipam_host: "https://dest-eipddip01.itc.global.mahle"
+domain_username: "S0005968"
+var_vcenter_username: "S0005885"
+var_vcenter_host: "defr-vcsa01.itc.global.mahle"
+cyberark_host: "dest-fiadml02.itc.global.mahle:8443"
+app_id_vcenter: AWX_AWX_WIPRO
+app_id_ipam: AWX_AWX_WIPRO
+app_id_domain: AWX_AWX_WIPRO
+OM_base_url: "http://dest-hirojsl01.itc.global.mahle:4400"
+gui_org_unit: "/Service_Provider/Service_T2/server/Infra/database"
+gui_ad_group: "ITC\\T2_DEFR_Database_Admin"
+gui_desc: "ST Test Server"
+
+cluster_names:
+  - DEFR-PROD01
+  - DEFR-PROD02
+
+datastore_map:
+  DEFR-PROD01: PROD01_vsanDatastore
+  DEFR-PROD02: PROD02_vsanDatastore
+
+utilization_threshold: 80
+
+storage_map:
+  DEFR-PROD01:
+    Gold_Server_Virtual:
+      policy_def2: DEFR_PROD01_Mirrored_SP01
+      policy_def8: DEFR_PROD01_Mirrored_SP01
+    Silver_Server_Virtual:
+      policy_def2: DEF2_PROD01_Non-Mirrored_SP01
+      policy_def8: DEF8_PROD01_Non-Mirrored_SP01
+    Bronze_Server_Virtual:
+      policy_def2: DEF2_PROD01_Non-Mirrored_SP01
+      policy_def8: DEF8_PROD01_Non-Mirrored_SP01
+  DEFR-PROD02:
+    Gold_Server_Virtual:
+      policy_def2: DEFR_PROD02_Mirrored_SP01
+      policy_def8: DEFR_PROD02_Mirrored_SP01
+    Silver_Server_Virtual:
+      policy_def2: DEF2_PROD02_Non-Mirrored_SP01
+      policy_def8: DEF8_PROD02_Non-Mirrored_SP01
+    Bronze_Server_Virtual:
+      policy_def2: DEF2_PROD02_Non-Mirrored_SP01
+      policy_def8: DEF8_PROD02_Non-Mirrored_SP01
+
+vlans:
+  - "DEFR-DC-VLAN1069"

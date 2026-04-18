@@ -1,0 +1,117 @@
+---
+- name: Add host to dynamic inventory
+  hosts: localhost
+  tasks:
+    - name: Create dynamic Inv
+      ansible.builtin.add_host:
+        name: "{{ var_ipadd }}"
+        groups: dynamic_hosts
+- name: Install Nessus agent on Linux server
+  hosts: dynamic_hosts
+  gather_facts: true
+  become: true
+  vars_files:
+    - var_list_linux.yml
+  tasks:
+    - name: Check if /mnt/binaries is already mounted
+      ansible.builtin.command: mountpoint -q /mnt/binaries
+      register: mount_check
+      changed_when: false
+      ignore_errors: true
+    - name: Get password from cyberark for Service account S0005999
+      ansible.builtin.uri:
+        url: https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{
+          app_id_ipam | default() }}&username={{ ipam_username | default() }}
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: aim_response
+      no_log: true
+    - name: Store password
+      ansible.builtin.set_fact:
+        ipam_password: "{{ aim_response.json.Content }}"
+      no_log: true
+    - name: Create /mnt/binaries directory if not present and not mounted
+      ansible.builtin.file:
+        path: /mnt/binaries
+        state: directory
+        mode: "0755"
+      when: mount_check.rc != 0
+    - name: Mount file share on linux server if not mounted
+      ansible.posix.mount:
+        src: "//10.145.99.112/Binaries"
+        path: /mnt/binaries
+        fstype: cifs
+        opts: "username=S0005999,password={{ ipam_password | default() }}"
+        state: mounted
+      when: mount_check.rc != 0
+      register: binaries
+      no_log: true
+    - name: Check if Nessus Agent is already installed
+      ansible.builtin.command: rpm -q NessusAgent
+      register: nessus
+      ignore_errors: true
+      changed_when: false
+      failed_when: false
+      # noqa command-instead-of-module
+    - name: Install nessus agent If server is RHEL
+      ansible.builtin.dnf:
+        name: /mnt/binaries/QA/Linux/NessusAgent/Tenable/NessusAgent-10.8.2-el9.x86_64.rpm
+        state: present
+      changed_when: false
+      when:
+        - ansible_distribution == "RedHat"
+        - nessus.rc != 0
+    - name: Install nessus agent If server is SUSE
+      community.general.zypper:
+        name: /mnt/binaries/QA/Linux/NessusAgent/Tenable/NessusAgent-10.8.2-suse15.x86_64.rpm
+        state: present
+      changed_when: false
+      when:
+        - ansible_os_family == "Suse"
+        - nessus.rc != 0
+    - name: Link Nessus Agent to tenable manager
+      ansible.builtin.command: /opt/nessus_agent/sbin/nessuscli agent
+        link  --key=063d2e9e8d2750227e67e88022fca3f7278fceaef4ea07ab2325f80926136fd4
+        --host=dest-secproxy10.itc.global.mahle --port=443
+      changed_when: false
+      register: nessus_link
+      ignore_errors: true
+    - name: Force unlink and retry linking if previous link failed
+      ansible.builtin.shell: |
+        set -o pipefail
+        /opt/nessus_agent/sbin/nessuscli prepare-image &&
+        /opt/nessus_agent/sbin/nessuscli agent
+        link  --key=063d2e9e8d2750227e67e88022fca3f7278fceaef4ea07ab2325f80926136fd4
+        --host=dest-secproxy10.itc.global.mahle --port=443
+      when: "'409' in nessus_link.stdout or nessus_link.rc != 0"
+      changed_when: false
+    - name: Start the agent
+      ansible.builtin.service:
+        name: nessusagent
+        state: started
+        enabled: true
+      register: nessus_service
+    - name: Unmount the share /mnt/binaries
+      ansible.posix.mount:
+        path: /mnt/binaries
+        state: absent
+    - name: ServiceTheater Update for all tasks in VM clone
+      ansible.builtin.debug:
+        msg:
+          - "target_host        : {{ inventory_hostname | default('') }}"
+          - "task_name          : Check VM clone status"
+          - "status_msg         : Nessus Agent is installed successfully and in
+            Running"
+          - "status             : Success"
+          - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+      when: nessus_service.state == 'started'
+    - name: ServiceTheater Failure Update for all tasks in VM clone block
+      ansible.builtin.debug:
+        msg:
+          - "target_host        : {{ inventory_hostname | default('') }}"
+          - "task_name          : {{ ansible_failed_task['name'] }}"
+          - "status_msg         : {{ ansible_failed_result['msg'] }}"
+          - "status             : Failed"
+          - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+      when: nessus_service.state != 'started'

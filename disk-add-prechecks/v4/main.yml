@@ -1,0 +1,181 @@
+---
+- name: VM New Disk Addition Pre-Checks
+  hosts: localhost
+  gather_facts: true
+  no_log: false
+
+  vars_files:
+    - vars_disk_add.yml
+
+  tasks:
+
+    - name: Get vcenter credentials from cyberark
+      ansible.builtin.uri:
+        url: "https://{{ cyberark_host | default() }}/AIMWebService/api/Accounts?AppID={{ app_id_vcenter | default() }}&username={{ var_vcenter_username | default() }}"
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: vcenter_cred
+      no_log: true
+
+    # Block - 1 (Validate if VM has any snapshot)
+    - name: Validate if VM has any snapshot
+      block:
+
+        # Validate the VM presense in vCenter
+        - name: Gather VM info
+          community.vmware.vmware_vm_info:
+            hostname: '{{ var_vcenter_host | default() }}'
+            username: '{{ var_vcenter_username | default() }}'
+            password: '{{ vcenter_cred.json.Content }}'
+            vm_name: "{{ var_hostname }}"
+          register: vm_info
+          failed_when: false
+
+        # Print the virtual machine information
+        - name: Print the VM information
+          ansible.builtin.debug:
+            var: vm_info
+
+        # store datacenter name
+        - name: Set datacenter name
+          ansible.builtin.set_fact:
+            var_datacenter: "{{ vm_info.virtual_machines[0].datacenter }}"
+
+        # Gather guest machine facts to collect VM snapshots details
+        - name: Collect virtual machine facts
+          community.vmware.vmware_guest_info:
+            hostname: '{{ var_vcenter_host | default() }}'
+            username: '{{ var_vcenter_username | default() }}'
+            password: '{{ vcenter_cred.json.Content }}'
+            datacenter: "{{ var_datacenter | default() }}"
+            name: "{{ var_hostname }}"
+          register: vm_facts
+          when: vm_info is defined
+
+        # Set fact for snapshot info
+        - name: Set snapshot info fact
+          ansible.builtin.set_fact:
+            snapshot_info: "{{ snapshot_info | default([]) + [snapshot_dict] }}"
+          loop: "{{ vm_facts.instance.snapshots | selectattr('name') | list }}"
+          vars:
+            snapshot_dict:
+              snapshot_name: "{{ item.name }}"
+              creation_time: "{{ item.creation_time }}"
+              description: "{{ item.description }}"
+              id: "{{ item.id }}"
+              state: "{{ item.state }}"
+          when: vm_facts.instance.snapshots | length > 0
+
+        # Update ServiceTheater for VM snapshot validation
+        - name: "ServiceTheater Update for VM snapshot validation"
+          ansible.builtin.assert:
+            that:
+              - snapshot_info is not defined
+            success_msg: "No snapshots found in VM."
+            fail_msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Virtual Machine snapshots validation"
+              - "status_msg         : Prior to performing new disk addition, kindly remove the current snapshots"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        # If a VM snapshot already exists in the current VM, stop the execution.
+        - name: If the current VM has a snapshot, do not proceed
+          ansible.builtin.fail:
+            msg: "Prior to performing new disk addition, kindly remove the current snapshots"
+          when: snapshot_info is defined
+
+    # Block - 2 Select the Datastore with max space available and Validate that it has 20% free space
+    - name: Validate if datastore has free space available for new disk
+      block:
+
+        - name: Extract datastore names from VM info
+          ansible.builtin.set_fact:
+            var_datastore: >-
+              {{
+                vm_info.virtual_machines[0].datastore_url
+                | map(attribute='name')
+                | list
+              }}
+
+        - name: Get details of each VM-attached datastore individually
+          community.vmware.vmware_datastore_info:
+            hostname: '{{ var_vcenter_host | default() }}'
+            username: '{{ var_vcenter_username | default() }}'
+            password: '{{ vcenter_cred.json.Content }}'
+            name: "{{ item }}"
+          loop: "{{ var_datastore | default() }}"
+          register: vm_attached_datastores_raw
+
+        - name: Collect datastore info (flattened list)
+          ansible.builtin.set_fact:
+            vm_datastore_summaries: >-
+              {{
+                vm_attached_datastores_raw.results
+                | map(attribute='datastores')
+                | sum(start=[])
+              }}
+
+        - name: Find datastore with max free space
+          ansible.builtin.set_fact:
+            max_free_datastore: >-
+              {{
+                vm_datastore_summaries
+                | sort(attribute='freeSpace', reverse=True)
+                | first
+              }}
+
+        - name: Show datastore with max free space
+          ansible.builtin.debug:
+            msg: >
+              Datastore with max free space: {{ max_free_datastore.name }}
+              (Free space: {{ (max_free_datastore.freeSpace / 1024 / 1024 / 1024) | round(2) }} GB)
+
+        - name: Store Datastore name and it's free space
+          ansible.builtin.set_fact:
+            datastore_name: "{{ max_free_datastore.name }}"
+            ds_size_gb: "{{ (max_free_datastore.freeSpace / 1024 / 1024 / 1024) | round(2) }}"
+
+        - name: Debug
+          ansible.builtin.debug:
+            msg:
+              datastore_name: "{{ datastore_name | default() }}"
+
+        - name: Set disk_size from disk_size_gb
+          ansible.builtin.set_fact:
+            disk_size: "{{ disk_size_gb }}"
+
+        # get final disk size
+        - name: Calculate VM Size
+          ansible.builtin.set_fact:
+            vm_size: "{{ (disk_size | float) * 1.2 | round(2) }}"
+
+        # ServiceTheater Update for datastore free space and fail the play if datastore does not have sufficient space to add a new disk
+        - name: ServiceTheater Update for Datastore free space availability
+          ansible.builtin.assert:
+            that:
+              - ds_size_gb | int >= vm_size | int
+            success_msg: "Datastore has sufficient space for new disk addition to VM."
+            fail_msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Check datastore free space"
+              - "status_msg         : Insufficient datastore free space to perform addition of a new disk to VM"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        # If less space in datastore, stop the execution.
+        - name: If the datastore has less space, do not proceed
+          ansible.builtin.fail:
+            msg: "Insufficient datastore free space to add a new disk to VM"
+          when: ds_size_gb | int < vm_size | int
+
+          # Update ServiceTheater
+        - name: "ServiceTheater Update for all tasks in Disk add Pre-Checks"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Add new disk pre-checks status"
+              - "status_msg         : Following Pre-Checks are successful for New disk addition:\n1. VM has no snapshots.\n2. Datastore has enough free space for New disk addition."
+              - "status             : Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
