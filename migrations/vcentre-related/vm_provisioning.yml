@@ -1,0 +1,125 @@
+
+---
+- name: Linux VM Provisioning
+  hosts: localhost
+  gather_facts: true
+  no_log: false
+  vars_files:
+    - vaultx.yml
+  
+  vars:
+    vcenter_hostname: "vcsa80u3-rookie.sdxtest.local"
+    template_name: "RHEL9TEMP"
+    target_datastore: "datastore1-80.94"
+    cluster_name: "Training"
+    datacenter_name: "SDx-COE-SJP-S3-Rookie"
+    folder_name: "/SDx-COE-SJP-S3-Rookie/vm/"
+    num_cpus: "4"
+    memory_mb: "4096"
+    disk_size: "50"
+    var_domain: "sdxtest.local"
+    var_ipadd: "172.17.74.204"
+    var_netmask: "255.255.255.0"
+    var_dftgtw: "172.17.74.1"
+    var_dns: "172.17.65.134"
+    var_vmnetwork: "VLANID-1274"
+    
+  tasks:
+
+    # # Block - 1 (Create Linux VM, Power on VM, Perform VMWare Tools upgrade and Hardware upgrade)
+    - name: Create Linux VM    
+      block:
+        # Perform VM clone from Template
+        - name: Clone the Virtual Machine
+          community.vmware.vmware_guest:
+            hostname: "{{ vcenter_hostname }}"
+            username: "{{ vcenter_user | default() }}"
+            password: "{{ vcenter_password | default() }}"
+            validate_certs: false
+            name: "{{ var_hostname }}"
+            state: present
+            template: "{{ template_name }}"
+            datacenter: "{{ datacenter_name }}"
+            datastore: "{{ target_datastore }}"
+            cluster: "{{ cluster_name }}"
+            folder: "{{ folder_name }}"
+            wait_for_customization: yes
+            networks:
+              - name: "{{ var_vmnetwork }}"
+                ip: "{{ var_ipadd }}"
+                netmask: "{{ var_netmask }}"
+                gateway: "{{ var_dftgtw }}"
+                dns_servers:
+                  - "{{ var_dns }}"
+                start_connected: true
+                connected: true            
+            hardware:
+              num_cpus: "{{ num_cpus }}"
+              memory_mb: "{{ memory_mb }}"
+              hotadd_memory: true
+            disk:
+              - size_gb: "{{ disk_size }}"
+                type: thin
+                datastore: "{{ target_datastore }}"
+            customization:
+              hostname: "{{ var_hostname }}"
+              domain: "{{ var_domain }}"
+              dns_servers:
+              - "{{ var_dns }}"
+              timezone: "UTC"
+          register: vm_clone_info
+        
+        # Print the VM Clone status   
+        - name: Check VM clone status
+          ansible.builtin.debug:
+            var: vm_clone_info.changed
+
+        # Capture moid of new vm
+        - name: Capture moid
+          set_fact:
+            vm_moid: "{{ vm_clone_info.instance.moid }}"
+        
+         ######### this part is used to carry forward variable input #####
+        - name: Debug      
+          ansible.builtin.debug:
+            msg:
+              var_ipadd: "{{ var_ipadd }}"
+
+        - name: Debug      
+          ansible.builtin.debug:
+            msg:
+              vm_moid: "{{ vm_moid | default() }}"
+
+        # Wait for Linux server to boot and it is available in network
+        - name: Wait for Linux server to boot and become available in network 
+          ansible.builtin.wait_for:
+            timeout: 180
+          delegate_to: localhost
+
+        # Update ServiceTheater 
+        - name: "ServiceTheater Update for all tasks in VM clone"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : Check VM clone status"
+              - "status_msg         : The {{ var_hostname }} clone has been completed"
+              - "status             : Success"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+          when: vm_clone_info.changed | bool == true
+
+      rescue:
+
+        # Update ServiceTheater if any task failed in the VM creation
+        - name: "ServiceTheater Failure Update for all tasks in VM clone block"
+          ansible.builtin.debug:
+            msg:
+              - "target_host        : {{ inventory_hostname | default('') }}"
+              - "task_name          : {{ ansible_failed_task['name'] }}"
+              - "status_msg         : {{ ansible_failed_result['msg'] }}"
+              - "status             : Failed"
+              - "execution_date_time: {{ ansible_date_time['iso8601'] }}"
+
+        # Fail the playbook if any task failed in the playbook
+        - name: Failing the playbook if any task failed in the VM clone creation block
+          ansible.builtin.fail:
+            msg: "Error during playbook execution please check the respective failed task for more information"

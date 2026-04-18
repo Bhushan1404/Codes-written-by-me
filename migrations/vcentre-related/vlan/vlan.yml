@@ -1,0 +1,54 @@
+--- 
+- name: Fetch all VM details from vCenter including VLAN ID
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    vcenter_hostname: "{{ vcenter_hostname }}"
+    vcenter_username: "{{ vcenter_username }}"
+    vcenter_password: "{{ vcenter_password }}"
+
+  tasks:
+    - name: Gather information about all VMs in vCenter
+      community.vmware.vmware_vm_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: false
+      delegate_to: localhost
+      register: vminfo
+
+    - name: Set fact for filtered VM information
+      set_fact:
+        filtered_vms: >
+          {%- set filtered = [] -%}
+          {%- for vm in vminfo.virtual_machines -%}
+          {%- set item = {
+                "guest_name": vm.guest_name,
+                "esxi_hostname": vm.esxi_hostname,
+                "ip_address": vm.ip_address,
+                "datacenter": vm.datacenter,
+                "datastore_url": vm.datastore_url,
+                "moid": vm.moid,
+                "power_state": vm.power_state
+              } -%}
+          {{ filtered.append(item) }}
+          {%- endfor -%}
+          {{ filtered | default () }}
+
+    - name: Get VLAN ID for each VM
+      community.vmware.vmware_guest_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: no
+        datacenter: "{{ item.datacenter }}"
+        name: "{{ item.guest_name }}"
+      delegate_to: localhost
+      loop: "{{ filtered_vms | default() }}"
+      ignore_errors: true
+      register: vlan_info
+
+    - name: Print VLAN info structure
+      debug:
+        var: vlan_info.results

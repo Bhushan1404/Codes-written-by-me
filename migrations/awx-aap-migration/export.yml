@@ -1,0 +1,35 @@
+---
+- name: Export all configuration from AWX
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - awx.awx
+  vars_files:
+    - vault.yml
+  tasks:
+    - name: Export all resources
+      awx.awx.export:
+        all: false
+        inventory: 'all'
+        credentials: 'all'
+        organizations: 'all'
+        projects: 'all'
+        job_templates: 'all'
+        teams: 'all'
+        users: 'all'
+        workflow_job_templates: 'all'
+        schedules: 'all'
+        notification_templates: 'all'
+        inventory_sources: 'all'
+        credential_types: 'all'
+        applications: 'all'
+        controller_host: "{{ awx_host }}"
+        controller_username: "{{ awx_username }}"
+        controller_password: "{{ awx_password }}"
+        tower_verify_ssl: false
+      register: awx_export
+
+    - name: Save export to file
+      copy:
+        content: "{{ awx_export.assets | to_nice_json }}"
+        dest: "./awx_full_export.json"
