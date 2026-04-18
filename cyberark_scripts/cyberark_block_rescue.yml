@@ -1,0 +1,59 @@
+- name: Get the target machine password from CyberArk vault
+  block:
+    - name: CyberArk query for Credential
+      cyberark.pas.cyberark_credential:
+         api_base_url: "{{ api_base_url }}"
+         validate_certs: true
+         client_cert: /etc/pki/ca-trust/source/anchors/client_decrypted_cert.pem
+         client_key: /etc/pki/ca-trust/source/anchors/client_decrypted_key.pem
+         app_id: "{{ app_id }}"
+         query: "Safe=D-EU-LNXDS-02045-PATCH;Object=sandozdev.net-SYS_02045_AWXLINUX"
+         connection_timeout: 60
+         query_format: Exact
+         fail_request_on_password_change: true
+         reason: "retriving Windows AD Credential for Patching"
+         connection_timeout: 300
+      delegate_to: localhost
+      register: ca_password
+      until: ca_password.status_code in [ 200 ]
+      retries: 15
+      delay: 5
+      no_log: true 
+   
+    - name: ServiceTheater failure update
+      ansible.builtin.debug:
+        msg:
+          - "target_host      : {{ inventory_hostname | default('') }}"
+          - "task_name        : Check the server exists on CyberArk vault"
+          - "status_msg       : The server exists on the CyberArk vault and the retrieval of the password successful"
+          - "status           : Success"
+          - "execution_date_time :"
+      when: ca_password.status_code == 200
+     
+    - name: ServiceTheater failure update
+      ansible.builtin.debug:
+        msg:
+          - "target_host      : {{ inventory_hostname | default('') }}"
+          - "task_name        : 3Check the server exists on CyberArk vault"
+          - "status_msg       : The server doesn't exists on the CyberArk vault"
+          - "status           : Failed"
+          - "execution_date_time :"
+      when: ca_password.status_code != 200
+   
+    - name: Set facts to store the user id and password
+      set_fact:
+        ansible_user: "{{ ca_password.result.UserName }}"
+        ansible_password: "{{ ca_password.result.Content }}"
+      # no_log: true
+      when: ca_password.status_code == 200
+ 
+  rescue:
+    - name: ServiceTheater failure update
+      ansible.builtin.debug:
+        msg:
+          - "target_host      : {{ inventory_hostname | default('') }}"
+          - "task_name        : {{ ansible_failed_task['name'] }}"
+          - "status_msg       : {{ ansible_failed_result['msg'] }}"
+          - "status           : Failed"
+          - "execution_date_time : "
+

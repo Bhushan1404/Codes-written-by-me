@@ -1,0 +1,71 @@
+---
+- name: Retrieve CyberArk credentials based on domain
+  hosts: all
+  gather_facts: false
+  collections:
+    - cyberark.pas
+  vars:
+    domain_config_string: |
+      {
+        "<domain>dev.net": {
+          "api_base_url": "https://<server>.<domain>dev.net",
+          "app_id": "<APP-ID>"
+        },
+        "<domain>int.net": {
+          "api_base_url": "https://ccp-qa.<domain>int.net",
+          "app_id": "<app-id of qa cyberark>"
+        },
+        "<domain>.net": {
+          "api_base_url": "https://ccp.<domain>.net",
+          "app_id": "<app-id of prod cyberark>"
+        }
+      }
+
+  tasks:
+
+    - name: Convert JSON string to dictionary
+      set_fact:
+        domain_fetch: "{{ domain_config_string | from_yaml }}"
+
+    - name: Extract domain from hostname
+      set_fact:
+        inv_domain: "{{ inventory_hostname.split('.')[-2] ~ '.' ~ inventory_hostname.split('.')[-1] }}"
+
+    - name: Fail if domain is not mapped
+      fail:
+        msg: "Host '{{ inventory_hostname |default() }}' has unsupported domain '{{ inv_domain|default() }}'. Please check inventory or domain_config_string."
+      when: inv_domain not in domain_fetch
+
+    - name: Set CyberArk API variables based on domain
+      set_fact:
+        api_base_url: "{{ domain_fetch[inv_domain].api_base_url }}"
+        app_id: "{{ domain_fetch[inv_domain].app_id }}"
+
+    - name: Debug resolved domain and API details
+      debug:
+        msg:
+          - "inventory_hostname: {{ inventory_hostname |default() }}"
+          - "inv_domain: {{ inv_domain|default() }}"
+          - "api_base_url: {{ api_base_url |default() }}"
+          - "app_id: {{ app_id |default() }}"
+
+    - name: Call CyberArk API using curl with passphrase
+      shell: sudo -u root bash -c 'curl -s -X GET  --http1.1 "https://<server>.<domain>dev.net/AIMWebService/api/Accounts?AppID=<APP-ID>&Safe=<SAFE-ID>&Object=<domain>dev.net-<SERVICE-ACC>" --cert /etc/pki/ca-trust/source/anchors/client_decrypted_cert.pem --key /etc/pki/ca-trust/source/anchors/client_decrypted_key.pem'
+      delegate_to: server.<domain>.net
+      vars: 
+        ansible_user: 
+        ansible_password:
+      register: curl_output
+
+    - name: Parse CyberArk JSON
+      set_fact:
+       target_server_user: "{{ (curl_output.stdout | from_json).UserName }}"
+       target_server_password: "{{ (curl_output.stdout | from_json).Content }}"
+
+    - name: save creds temporary
+      copy: 
+        content: |
+                export ansible_user={{ target_server_user }}
+                export ansible_password={{ target_server_password }}
+        dest: "/home/gitlab-runner/builds/t1_GFx85/0/dev_pt/dev_patchtheater/.cyberark_creds.env"
+      delegate_to: localhost

@@ -1,0 +1,5 @@
+collections:
+    - name: community.windows
+    - name: cyberark.conjur
+    - name: cyberark.pas
+    - name: community.general

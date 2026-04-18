@@ -1,0 +1,44 @@
+---
+ - name: To check the cyberark creds
+   hosts: all
+   gather_facts: false
+   become: true
+   collections:
+      - cyberark.pas
+   tasks:
+     - name: credential retrival
+       cyberark_credential:
+         api_base_url: "https://<server>-sd320003.<domain>dev.net"
+         validate_certs: true
+         client_cert: /etc/pki/ca-trust/source/anchors/client_decrypted_cert.pem
+         client_key: /etc/pki/ca-trust/source/anchors/client_decrypted_key.pem
+         app_id: "<APP-ID>"
+         query: "Safe=<SAFE-ID>;Object=<domain>dev.net-<SERVICE-ACC>"
+         connection_timeout: 60
+         query_format: Exact
+         fail_request_on_password_change: true
+         reason: "retriving Windows AD Credential for Patching"
+         connection_timeout: 300
+       delegate_to: localhost
+       register: ca_password
+       until: ca_password.status_code in [ 200 ]
+       retries: 15
+       delay: 5
+       #no_log: true
+       environment: 
+           no_proxy: "localhost,127.0.0.1,SZATKU-SD320003.<domain>dev.net"
+
+
+     - name: setfact
+       set_fact:
+         ansible_user: "{{ ca_password.result.UserName }}"
+         ansible_password: "{{ ca_password.result.Content }}"
+         ansible_connection: ssh
+         ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+       register: xyz
+
+     - debug: 
+         msg: |
+                 -  ansible_user:  {{ ansible_user | regex_replace ( '.*', '***************' ) }}
+                 -  ansible_password: {{ ansible_password | regex_replace ( '.*', '********************' ) }}

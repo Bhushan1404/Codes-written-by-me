@@ -1,0 +1,763 @@
+---
+ - name: Fetching Precheck data
+   hosts: all
+   become: yes
+   gather_facts: false
+   become_method: dzdo
+   tasks:
+     - name: Initiate task failure
+       set_fact:
+         fail_reason: []
+     - block:
+         - name: Check if host is reachable
+           shell: whoami
+           register: ssh_test
+           ignore_unreachable: yes
+           ignore_errors: yes
+
+         - name: Set unreachable Reason
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['SSH Failed: '~ (ssh_test.msg | default(ssh_test.stderr, true)| default('Unknown Error'))] }}"
+           when: ssh_test is failed or ssh_test.unreachable is defined
+
+         - name: setup
+           setup:
+           register: setup_status
+           no_log: true
+
+         - name: Set gatherfact failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['Gather facts failed: ' ~ (setup_status.msg |default(setup_status.stderr, true) | default('Unknown Error'))] }}"
+           when: setup_status.failed
+       when: fail_reason | length == 0
+
+     - block:
+         - name: To fetch the hostname of server
+           debug:
+             msg: "{{ ansible_facts.hostname }}"
+           register: hostnmae_op
+
+         - name: Set hostname failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['Hostname task failed: ' ~ (hostnmae_op.msg |default(hostnmae_op.stderr, true) | default('Unknown Error'))] }}"
+           when: hostnmae_op.failed
+
+
+         - name: To fetch the adinfo of the server
+           shell: adinfo
+           register: adinfo_op
+
+         - name: Set adinfo failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['adinfo task failed: ' ~ (adinfo_op.msg |default(adinfo_op.stderr, true) | default('Unknown Error'))] }}"
+           when: adinfo_op.failed
+
+         - name: To fetch the date
+           shell: date
+           register: date_op
+
+         - name: Set date failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['date task failed: ' ~ (date_op.msg |default(date_op.stderr, true) | default('Unknown Error'))] }}"
+           when: date_op.failed
+
+         - name: To fetch the uptime of server
+           shell: uptime
+           register: uptime_op
+
+         - name: Set Uptime failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['Uptime task failed: ' ~ (uptime_op.msg |default(uptime_op.stderr, true) | default('Unknown Error'))] }}"
+           when: uptime_op.failed
+
+         - name: To fetch the current kernel version
+           shell: uname -r
+           register: uname_op
+
+         - name: Set Kernel failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['Kernel Check task failed: ' ~ (uname_op.msg |default(uname_op.stderr, true) | default('Unknown Error'))] }}"
+           when: uname_op.failed
+
+         - name: To fetch the stat of iptables
+           shell: stat /etc/sysconfig/iptables
+           register: iptable_op
+
+         - name: Set iptable failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['iptable task failed: ' ~ (iptable_op.msg |default(iptable_op.stderr, true) | default('Unknown Error'))] }}"
+           when: iptable_op.failed
+
+         - name: iptable status
+           shell: systemctl status iptables | grep Active
+           register: iptables_st_op
+
+         - name: Set iptable status failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['iptable status Check task failed: ' ~ (iptables_st_op.msg |default(iptables_st_op.stderr, true) | default('Unknown Error'))] }}"
+           when: iptables_st_op.failed
+
+         - name: iptables config
+           shell: cat /etc/sysconfig/iptables | grep -v "^#"
+           register: iptable_config_op
+
+         - name: Set iptable config failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['iptable config  task failed: ' ~ (iptable_config_op.msg |default(iptable_config_op.stderr, true) | default('Unknown Error'))] }}"
+           when: iptable_config_op.failed
+
+         - name: Repo stats
+           shell: stat /etc/yum.repos.d/*DZ.repo
+           register: dzrepo_op
+
+         - name: Set Repo stat failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['stat dzrepo  task failed: ' ~ (dzrepo_op.msg |default(dzrepo_op.stderr, true) | default('Unknown Error'))] }}"
+           when: dzrepo_op.failed
+
+         - name: check available repo
+           shell: cat /etc/yum.repos.d/*DZ.repo
+           register: repo_op
+
+         - name: check available repo failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['check dzrepo task failed: ' ~ (repo_op.msg |default(repo_op.stderr, true) | default('Unknown Error'))] }}"
+           when: repo_op.failed
+
+         - name: To check the grub file
+           shell: |
+                  #!/bin/bash
+                  FILES=("/etc/grub2.cfg" "/etc/grub.conf")
+                  for FILE in "${FILES[@]}"; do
+                     if [ -f "$FILE" ]; then
+                        echo "$FILE exists."
+                      cat "$FILE" | grep -v "^#"
+                      else
+                        echo "$FILE does not exist."
+                      fi
+                  done
+           register: grub_op
+
+         - name: gather grub file info failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['grub file task failed: ' ~ (grub_op.msg |default(grub_op.stderr, true) | default('Unknown Error'))] }}"
+           when: grub_op.failed
+
+         - name: Kernel interface table
+           shell: netstat -in
+           register: netstat_op
+
+         - name: check kernel interface  failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['check kernel interface task failed: ' ~ (netstat_op.msg |default(netstat_op.stderr, true) | default('Unknown Error'))] }}"
+           when: netstat_op.failed
+
+         - name: Kernel routing table
+           shell: netstat -rn
+           register: netstat_rn_op
+
+         - name: check kernel routing failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['kernel routing task failed: ' ~ (netstat_rn_op.msg |default(netstat_rn_op.stderr, true) | default('Unknown Error'))] }}"
+           when: netstat_rn_op.failed
+
+
+         - name: Filesystem mount details
+           shell: mount
+           register: mount_op
+
+         - name: mount command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['mount task failed: ' ~ (mount_op.msg |default(mount_op.stderr, true) | default('Unknown Error'))] }}"
+           when: mount_op.failed
+
+         - name: To display pvs
+           shell: pvs
+           register: pvs_op
+
+         - name: pvs command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['pvs task failed: ' ~ (pvs_op.msg |default(pvs_op.stderr, true) | default('Unknown Error'))] }}"
+           when: pvs_op.failed
+
+         - name: To display vgs
+           shell: vgs
+           register: vgs_op
+
+         - name: vgs command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['vgs task failed: ' ~ (vgs_op.msg |default(vgs_op.stderr, true) | default('Unknown Error'))] }}"
+           when: vgs_op.failed
+
+         - name: To display lvs
+           shell: lvs
+           register: lvs_op
+
+         - name: lvs command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['lvs task failed: ' ~ (lvs_op.msg |default(lvs_op.stderr, true) | default('Unknown Error'))] }}"
+           when: lvs_op.failed
+
+         - name: Display ifconfig
+           shell: ifconfig -a
+           register: ifconfig_op
+
+         - name: ifconfig failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['ifconfig task failed: ' ~ (ifconfig_op.msg |default(ifconfig_op.stderr, true) | default('Unknown Error'))] }}"
+           when: ifconfig_op.failed
+
+         - name: To display server IP/loopback ip
+           shell: ip a
+           register: ip_op
+
+         - name: Server Ip failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['server IP/loopback task failed: ' ~ (ip_op.msg |default(ip_op.stderr, true) | default('Unknown Error'))] }}"
+           when: ip_op.failed
+
+         - name: runnig pvdisplay command
+           shell: pvdisplay
+           register: pvdisplay_op
+
+         - name: pvdisplay command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['pvdisplay task failed: ' ~ (pvdisplay_op.msg |default(pvdisplay_op.stderr, true) | default('Unknown Error'))] }}"
+           when: pvdisplay_op.failed
+
+         - name: running vgdisplay command
+           shell: vgdisplay
+           register: vgdisplay_op
+
+         - name: vgdisplay command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['vgdisplay task failed: ' ~ (vgdisplay_op.msg |default(vgdisplay_op.stderr, true) | default('Unknown Error'))] }}"
+           when: vgdisplay_op.failed
+
+         - name: running lvdisplay command
+           shell: lvdisplay
+           register: lvdisplay_op
+
+         - name: lvdisplay command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['lvdisplay task failed: ' ~ (lvdisplay_op.msg |default(lvdisplay_op.stderr, true) | default('Unknown Error'))] }}"
+           when: lvdisplay_op.failed
+
+         - name: running netstat -a command
+           shell: netstat -a
+           register: nets_op
+
+         - name: netstat -a  command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['netstat -a  task failed: ' ~ (nets_op.msg |default(nets_op.stderr, true) | default('Unknown Error'))] }}"
+           when: nets_op.failed
+
+         - name: running netstat -pl command
+           shell: netstat -pl
+           register: nets_pl_op
+
+         - name: netstat -pl command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['netstat -pl task failed: ' ~ (nets_pl_op.msg |default(nets_pl_op.stderr, true) | default('Unknown Error'))] }}"
+           when: nets_pl_op.failed
+
+         - name: running netstat -r command
+           shell: netstat -r
+           register: nets_r_op
+
+         - name: netstat -r command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['netstat -r task failed: ' ~ (nets_r_op.msg |default(nets_r_op.stderr, true) | default('Unknown Error'))] }}"
+           when: nets_r_op.failed
+
+         - name: running blkid command
+           shell: blkid
+           register: blkid_op
+
+         - name: blkid command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['blkid task failed: ' ~ (blkid_op.msg |default(blkid_op.stderr, true) | default('Unknown Error'))] }}"
+           when: blkid_op.failed
+
+         - name: runnign lsblk command
+           shell: lsblk
+           register: lsblk_op
+
+         - name: lsblk command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['lsblk task failed: ' ~ (lsblk_op.msg |default(lsblk_op.stderr, true) | default('Unknown Error'))] }}"
+           when: lsblk_op.failed
+
+         - name: total process running
+           shell: ps -ef
+           register: ps_op
+
+         - name: process command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['ps -ef task failed: ' ~ (ps_op.msg |default(ps_op.stderr, true) | default('Unknown Error'))] }}"
+           when: ps_op.failed
+
+         - name: running yum history
+           shell: yum history
+           register: yum_history_op
+
+         - name: yum history command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['yum history task failed: ' ~ (yum_history_op.msg |default(yum_history_op.stderr, true) | default('Unknown Error'))] }}"
+           when: yum_history_op.failed
+
+         - name: Database checkup
+           block:
+             - name: ps -ef | egrep "pmon|tns"
+               shell: ps -ef | egrep "pmon|tns"
+               register: ps_tns_op
+
+             - name: ps -ef | egrep "pmon|tns" command failure
+               set_fact:
+                 fail_reason: "{{ fail_reason | default() + ['ps -ef egrep pmon|tns  task failed: ' ~ (ps_tns_op.msg |default(lvdisplay_op.stderr, true) | default('Unknown Error'))] }}"
+               when: ps_tns_op.failed
+           when: inventory_hostname is search('(?i)SD26')
+
+         - name: Display fstab entries
+           shell: cat /etc/fstab |grep -v "^#"
+           register: fstab_op
+
+         - name: fstab command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['fstab task failed: ' ~ (fstab_op.msg |default(fstab_op.stderr, true) | default('Unknown Error'))] }}"
+           when: fstab_op.failed
+
+         - name: Display Filesysetm
+           shell: df -hT
+           register: df_op
+
+         - name: Filesystem command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['df -hT task failed: ' ~ (df_op.msg |default(df_op.stderr, true) | default('Unknown Error'))] }}"
+           when: df_op.failed
+
+         - name: Display filesystem word count
+           shell: df -hT | wc -l
+           register: dfwc_op
+
+         - name: Filesystem word count command failure
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['df -hT | wc -l task failed: ' ~ (dfwc_op.msg |default(dfwc_op.stderr, true) | default('Unknown Error'))] }}"
+           when: dfwc_op.failed
+
+         - name: Check if sos package is installed
+           shell: rpm -q sos
+           register: sos_installed
+           ignore_errors: true
+
+         - name: Install sos package if missing
+           shell: yum install -y sos
+           when: sos_installed.rc != 0
+
+         - name: Capture sos report
+           command: sos report --batch
+           register: sos_report
+
+         - name: Failed to capture sos report
+           set_fact:
+             fail_reason: "{{ fail_reason | default() + ['capture sos report task failed: ' ~ (sos_report.msg |default(sos_report.stderr, true) | | default('Unknown Error'))] }}"
+           when: sos_report.failed
+
+         - name: Extract sos location
+           set_fact:
+             sos_report_location: "{{ sos_report.stdout | regex_search('(/var/tmp/sosreport-\\S+\\.tar\\.xz)', '\\1') }}"
+
+         - name: Display sos report location
+           debug:
+             msg: "sos report generated at {{ sos_report_location | default() }}"
+       when: fail_reason | length == 0
+
+     - name: Register Summary
+       set_fact:
+          summary: "{{ inventory_hostname.ljust(30) }} | {{ 'Precheck is completed successfully' if (fail_reason | length == 0) else (fail_reason | join('; ') |regex_replace('\\n', ' ') |regex_replace('\\s+', ' ') ) }}"
+
+     - name: Save details of precheck in file
+       copy:
+         dest: "/tmp/{{ inventory_hostname }}_precheck_out.txt"
+         content: |
+          Hostname:
+
+          {{ ansible_facts.hostname | default() | default('FAILED: Not gathered') }}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          adinfo:
+
+          {% if adinfo_op.rc == 0 %}
+          {{ adinfo_op.stdout }}
+          {% else %}
+          FAILED: {{ adinfo_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          Date:
+
+          {% if date_op.rc == 0 %}
+          {{ date_op.stdout }}
+          {% else %}
+          FAILED: {{ date_op.stderr | default() }}
+          {% endif %}
+
+          ----------------------------------------------------------------------------------------------------------------------
+
+          Uptime:
+
+          {% if uptime_op.rc == 0 %}
+          {{ uptime_op.stdout }}
+          {% else %}
+          FAILED: {{ uptime_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          Kernel:
+
+          {% if uname_op.rc == 0 %}
+          {{ uname_op.stdout }}
+          {% else %}
+          FAILED: {{ uname_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          IPTABLES:
+
+          {% if iptable_op.rc == 0 %}
+          {{ iptable_op.stdout }}
+          {% else %}
+          FAILED: {{ iptable_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          IPTABLE Status:
+
+          {% if iptables_st_op.rc == 0 %}
+          {{ iptables_st_op.stdout }}
+          {% else %}
+          FAILED: {{ iptables_st_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          Repo Details:
+
+          {% if repo_op.rc == 0 %}
+          {{ repo_op.stdout }}
+          {% else %}
+          FAILED: {{ repo_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          Grub File Content:
+
+          {% if grub_op.rc == 0 %}
+          {{ grub_op.stdout }}
+          {% else %}
+          FAILED: {{ grub_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          Netstat Kernel interface table:
+
+          {% if netstat_op.rc == 0 %}
+          {{ netstat_op.stdout }}
+          {% else %}
+          FAILED: {{ netstat_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          Netstat Kernel routing table:
+
+          {% if netstat_rn_op.rc == 0 %}
+          {{ netstat_rn_op.stdout }}
+          {% else %}
+          FAILED: {{ netstat_rn_op.stderr | default() }}
+          {% endif %}
+
+          ----------------------------------------------------------------------------------------------------------------------
+
+          Filesystem mount details:
+
+          {% if mount_op.rc == 0 %}
+          {{ mount_op.stdout }}
+          {% else %}
+          FAILED: {{ mount_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          PVS Details:
+
+          {% if pvs_op.rc == 0 %}
+          {{ pvs_op.stdout }}
+          {% else %}
+          FAILED: {{ pvs_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          VGS Details:
+
+          {% if vgs_op.rc == 0 %}
+          {{ vgs_op.stdout }}
+          {% else %}
+          FAILED: {{ vgs_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          LVS Details:
+
+          {% if lvs_op.rc == 0 %}
+          {{ lvs_op.stdout }}
+          {% else %}
+          FAILED: {{ lvs_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          IFCONFIG Details:
+
+          {% if ifconfig_op.rc == 0 %}
+          {{ ifconfig_op.stdout }}
+          {% else %}
+          FAILED: {{ ifconfig_op.stderr | default() }}
+          {% endif %}
+
+          ----------------------------------------------------------------------------------------------------------------------
+
+          IP Details:
+
+          {% if ip_op.rc == 0 %}
+          {{ ip_op.stdout }}
+          {% else %}
+          FAILED: {{ ip_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          PVDISPLAY Details:
+
+          {% if pvdisplay_op.rc == 0 %}
+          {{ pvdisplay_op.stdout }}
+          {% else %}
+          FAILED: {{ pvdisplay_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          VGDISPLAY Details:
+
+          {% if vgdisplay_op.rc == 0 %}
+          {{ vgdisplay_op.stdout }}
+          {% else %}
+          FAILED: {{ vgdisplay_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          LVDISPLAY Details:
+
+          {% if lvdisplay_op.rc == 0 %}
+          {{ lvdisplay_op.stdout }}
+          {% else %}
+          FAILED: {{ lvdisplay_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          netstat -a Details:
+
+          {% if nets_op.rc == 0 %}
+          {{ nets_op.stdout }}
+          {% else %}
+          FAILED: {{ nets_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          netstat -pl Details:
+
+          {% if nets_pl_op.rc == 0 %}
+          {{ nets_pl_op.stdout }}
+          {% else %}
+          FAILED: {{ nets_pl_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          netstat -r Details:
+
+          {% if nets_r_op.rc == 0 %}
+          {{ nets_r_op.stdout }}
+          {% else %}
+          FAILED: {{ nets_r_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          BLKID Details:
+
+          {% if blkid_op.rc == 0 %}
+          {{ blkid_op.stdout }}
+          {% else %}
+          FAILED: {{ blkid_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          LSBLK Details:
+
+          {% if lsblk_op.rc == 0 %}
+          {{ lsblk_op.stdout }}
+          {% else %}
+          FAILED: {{ lsblk_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          Running process Details:
+
+          {% if ps_op.rc == 0 %}
+          {{ ps_op.stdout }}
+          {% else %}
+          FAILED: {{ ps_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          pmon and tns process:
+
+          {% if inventory_hostname is search('(?i)SD26') %}
+            {% if ps_tns_op.rc == 0 %}
+          {{ ps_tns_op.stdout | default() }}
+            {% else %}
+          FAILED: {{ ps_tns_op.stderr |default() | default('Database Not present') }}
+            {% endif %}
+          {% else %}
+            SKIPPED (There is no Database on the server)
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          FSTAB FILE Details:
+
+          {% if fstab_op.rc == 0 %}
+          {{ fstab_op.stdout }}
+          {% else %}
+          FAILED: {{ fstab_op.stderr | default() }}
+          {% endif %}
+
+          ----------------------------------------------------------------------------------------------------------------------
+
+          Filesystem Details:
+
+          {% if df_op.rc == 0 %}
+          {{ df_op.stdout }}
+          {% else %}
+          FAILED: {{ df_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          Filesystem Word Count:
+
+          {% if dfwc_op.rc == 0 %}
+          {{ dfwc_op.stdout }}
+          {% else %}
+          FAILED: {{ dfwc_op.stderr | default() }}
+          {% endif %}
+
+          -----------------------------------------------------------------------------------------------------------------------
+
+          SOS Details:
+
+          {% if sos_report.rc == 0 %}
+          {{ sos_report.stdout }}
+          {% else %}
+          FAILED: {{ sos_report_op.stderr | default() }}
+          {% endif %}
+
+          -------------------------------------------------------------------------------------------------------------------------
+
+       ignore_errors: true
+
+     - name: Check whether prechecks exist on target servers
+       stat:
+          path: "/tmp/{{ inventory_hostname }}_precheck_out.txt"
+       register: precheck_stat
+
+
+     - name: Fetch precheck file to controller
+       fetch:
+        src: "/tmp/{{ inventory_hostname }}_precheck_out.txt"
+        dest: "{{ playbook_dir }}/collected_prechecks/"
+        flat: yes
+       when:
+        - fail_reason | length == 0
+        - precheck_stat.stat.exists
+
+ - name: Precheck file transfer to mysql host
+   hosts: localhost
+   gather_facts: false
+   vars_files:
+     - vars.yml
+   tasks:
+     - name: Copy the files
+       copy:
+         src: "{{ playbook_dir }}/collected_prechecks"
+         dest: "/home/ptuser/Precheck_report"
+         remote_src: false
+       delegate_to: <SERVER>.<DOMAIN>.net
+       vars:
+         ansible_ssh_user: "{{ awx_user | default() }}"
+         ansible_ssh_password: "{{ awx_password | default() }}"
+
+ - name: Display final formatted summary
+   hosts: localhost
+   gather_facts: true
+   vars_files:
+     - vars.yml
+   tasks:
+      - name: Collect summary
+        set_fact:
+          all_summary: >-
+                  {{
+                    hostvars
+                    | dict2items
+                    | selectattr('value.summary', 'defined')
+                    | map(attribute='value.summary')
+                    | map('regex_replace', '\n', ' ')
+                    | list
+                  }}
+
+      - name: Save summary in csv format
+        set_fact:
+          csv_format: >-
+                  {{
+                    ['HOSTNAME,PRECHECK_STATUS'] +
+                    all_summary |
+                    map('regex_replace', '\n', ' ') |
+                    map('regex_replace', '\s+', ' ') |
+                    map('regex_replace', '^(.*?)\s*\|\s*(.*)$', '\1,\2') |
+                    list
+                  }}
+
+      - name: Generate CSV
+        copy:
+          dest: /tmp/precheck_summary.csv
+          content: "{{ csv_format | join('\n') }}"
+        delegate_to: <SERVER>.<DOMAIN>.net
+        vars:
+          ansible_ssh_user: "{{ awx_user | default() }}"
+          ansible_ssh_password: "{{ awx_password | default() }}"

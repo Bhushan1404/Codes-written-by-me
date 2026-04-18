@@ -1,0 +1,39 @@
+---
+version: 3
+build_arg_defaults:
+  ANSIBLE_GALAXY_CLI_COLLECTION_OPTS: '--ignore-certs'
+dependencies:
+  galaxy: requirements.yml
+  python: requirements.txt
+  system: bindep.txt
+  ansible_core:
+    package_pip: ansible-core==2.15.9
+  ansible_runner:
+    package_pip: ansible-runner==2.3.6
+  python_interpreter:
+    package_system: "python3.11"
+    python_path: "/usr/bin/python3.11"
+images:
+  base_image:
+          name: registry.redhat.io/ansible-automation-platform-24/ee-minimal-rhel8:latest
+
+additional_build_steps:
+  append_final:
+    - RUN echo "This is a build step after the main build"
+      #- COPY plugins/become/dzdo.py /usr/share/ansible/plugins/become/dzdo.py
+    - RUN chmod 775 /opt/builder/bin/entrypoint
+    - ENTRYPOINT ["/bin/bash"]
+  prepend_base:
+    - COPY /etc/pki/ca-trust/source/anchors/Sandoz-CA-Bundle.crt /etc/pki/ca-trust/source/anchors/
+    - COPY /etc/pki/ca-trust/source/anchors/client_decrypted_cert.pem /etc/pki/ca-trust/source/anchors/
+    - COPY /etc/pki/ca-trust/source/anchors/client_decrypted_key.pem /etc/pki/ca-trust/source/anchors/
+    - COPY /etc/pki/ca-trust/source/anchors/cyberark.ca.pem /etc/pki/ca-trust/source/anchors/
+    - RUN chmod 600 /etc/pki/ca-trust/source/anchors/client*
+    - RUN update-ca-trust
+    - COPY _build/scripts/entrypoint /opt/builder/bin/entrypoint
+    - RUN chmod 775 /opt/builder/bin/entrypoint
+    - RUN ls -l /opt/builder/bin/entrypoint
+
+options:
+  user: root
+  package_manager_path: /usr/bin/microdnf

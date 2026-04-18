@@ -1,0 +1,230 @@
+---
+- name: Collect patch summary info from targets
+  hosts: all
+  gather_facts: no
+  become: yes
+  become_method: dzdo
+  vars_files:
+     - vars.yml 
+  tasks:
+    - name: Read precheck file
+      slurp:
+        src: "/tmp/{{ inventory_hostname }}_precheck_out.txt"
+      register: precheck_raw
+
+    - name: Read postcheck file
+      slurp:
+        src: "/tmp/{{ inventory_hostname }}_postcheck_out.txt"
+      register: postcheck_raw
+
+    - name: Decode precheck content
+      set_fact:
+        precheck_text: "{{ precheck_raw.content | b64decode }}"
+
+    - debug:
+        var: precheck_text
+
+    - name: Decode precheck content
+      set_fact:
+        postcheck_text: "{{ postcheck_raw.content | b64decode }}"
+
+    - name: Hostname
+      set_fact:
+        hostname: >-
+                {{
+                  (precheck_text.split('Hostname:')[1]
+                  .splitlines()
+                  | select('match', '^\S')
+                  | list)[0]
+                  | trim
+                }}
+
+    - debug:
+        var: hostname
+
+    - name: kernel before patching
+      set_fact:
+         precheck_kernel: "{{ precheck_text.split('Kernel:')[1].split('\n')[2] | trim }}"
+
+    - name: kernel after patching
+      set_fact:
+         postcheck_kernel: "{{ postcheck_text.split('Kernel:')[1].split('\n')[2] | trim }}"
+
+    - name: Get todays date
+      set_fact:
+          todays_date: "{{ lookup('pipe', 'date +\"%b %e\"')  }}"
+
+    - debug:
+          var: todays_date
+
+    - name: Get last reboot info
+      shell: last | grep reboot | head -1
+      register: last_reboot
+
+    - debug:
+        var: last_reboot
+
+    - name: Determine reboot statusdate
+      set_fact:
+        rebootstatus: >-
+          {{ 'Rebooted' if last_reboot.stdout is search(todays_date) else 'Not Rebooted' }}
+
+    - debug:
+        var: rebootstatus
+
+    - name: Extract FS word count from precheck
+      set_fact:
+        pre_fs_wc: "{{ precheck_text.split('Filesystem Word Count:')[1].split('\n')[2] | trim }}"
+
+    - name: Extract FS word count from postcheck
+      set_fact:
+        post_fs_wc: "{{ postcheck_text.split('Filesystem Word Count:')[1].split('\n')[2] | trim }}"
+
+    - name: Extract last patch applied and date of execution
+      set_fact:
+        post_last_patch: "{{ postcheck_text.split('Last Patch Applied:')[1].split('\n')[2] | trim }}"
+
+    - name: Check Database status on server
+      set_fact:
+        DB_status: "Databse is not present on the server"
+        register: db_status
+      when: inventory_hostname is not search('(?i)SD26')
+      failed_when: false
+
+    - name: Check database
+      shell: ps -ef| egrep 'pmon|tns' |egrep -v 'root|ansible'
+      register: databse_op
+      when: inventory_hostname is search('(?i)SD26')
+
+    - name: Set_fact
+      set_fact:
+        DB_status: "Database is running"
+      when: databse_op | length > 0
+
+    - name: setfact
+      set_fact:
+        DB_status: "Database is not running"
+      when: databse_op.skipped is true
+
+
+            # - name: get db name
+      #  set_fact:
+      #         DB_NAME: "{{ databse_op.stdout_lines | regex_findall('([A-Z]+)') }}"
+      #      when: databse_op | length > 0
+      # - debug:
+            #     var: DB_NAME
+
+    - name: Set DB Server presence or absence
+      set_fact:
+         DB_SERVER: >-
+            {% if inventory_hostname is search('(?i)SD26') %}
+            TRUE
+            {% else %}
+            FALSE
+            {% endif %}
+
+    - name: Get latest package installed date
+      shell: rpm -qa --last |head -1
+      register: latest_package_info
+
+    - name: Extract latest package dat
+      set_fact:
+        latest_patch_date: "{{ latest_package_info.stdout.split()[-3:] | join(' ') }}"
+
+    - name: Get todays date
+      shell: date '+%b_%d_%Y'
+      register: today_date
+
+    - name: Get todays date
+      shell: date --date='yesterday' '+%b %d %Y'
+      register: yesterday_date
+
+    - name: Determine Patch Status
+      set_fact:
+        patchstatus: >-
+            {{
+              'PATCHED'
+              if (rebootstatus == 'Rebooted')
+              or (latest_patch_date in [today_date.stdout, yesterday_date.stdout])
+              else 'NOT PATCHED'
+            }}
+   
+    - name: Add header if not exists
+      copy:
+        dest: "{{ playbook_dir }}/{{ today_date.stdout }}_Ansible_Outcome.csv"
+        content: "Hostname,Old_Kernel,New_Kernel,PatchStatus,RebootStatus,DB_Server,DB_Status,Pre_FS_WordCount,Post_FS_WordCount"
+      delegate_to: localhost
+      become_method: sudo 
+
+    - name: Append to local CSV
+      #delegate_to: localhost
+      lineinfile:
+        path: "{{ playbook_dir }}/{{ today_date.stdout }}_Ansible_Outcome.csv"
+        line: "{{ hostname | default() }},{{ precheck_kernel| default() }},{{ postcheck_kernel| default() }},{{ patchstatus| default() }},{{ rebootstatus| default() }},{{ DB_SERVER| trim }},{{ DB_status | default() }},{{ pre_fs_wc| default() }},{{ post_fs_wc| default() }}"
+        create: yes
+        insertafter: EOF
+      delegate_to: localhost
+      become_method: sudo
+
+    - name: Copy file from localhost to AWX 
+      become_method: sudo
+      copy: 
+        src: "{{ playbook_dir }}/{{ today_date.stdout }}_Ansible_Outcome.csv"
+        dest: "/home/ptuser/{{ today_date.stdout }}_Ansible_Outcome.csv"
+        remote_src: false
+        owner: ptuser
+        group: ptuser
+        mode: '0644'
+        delegate_to: <server>
+      vars:
+        ansible_ssh_user: "{{ awx_user | default() }}"
+        ansible_ssh_password: "{{ awx_password | default() }}"
+
+    - name: Remove Precheck files from target Host
+      file:
+        path: "/tmp/{{ inventory_hostname }}_precheck_out.txt"
+        state: absent
+
+    - name: Remove Postcheck files from target Host
+      file:
+        path: "/tmp/{{ inventory_hostname }}_postcheck_out.txt"
+        state: absent
+
+- name: Display final formatted summary
+  hosts: localhost
+  gather_facts: true
+  vars_files: 
+    - vars.yml
+  tasks:
+    - name: Register Date for mail
+      shell: date '+%b_%d_%Y'
+      register: date_mailx
+      changed_when: false
+
+    - name: Send Compare summary via mailx
+      shell: |
+             mailx -s "Ansible Outcome of Patching Activity {{ date_mailx.stdout }}" -a /home/ptuser/{{ date_mailx.stdout }}_Ansible_Outcome.csv bhushan_arun.mane_ext@<DOMAIN>.net  << EOF
+             Hi Reciever,
+
+             Greetings of the day....
+
+             PFB Ansible Outcome attached in CSV from Patching activity conducted on {{ date_mailx.stdout }}.
+
+             Regards,
+             Automation Team
+             EOF
+      args:
+        executable: /bin/bash
+      delegate_to: <SERVER>.<DOMAIN>.net
+      vars:
+        ansible_ssh_user: "{{ awx_user | default() }}"
+        ansible_ssh_password: "{{ awx_password | default() }}"
+
+    - name: Remove Ansible Outcome from the AWX server
+      file: 
+        path: "/home/ptuser/{{ date_mailx.stdout }}_Ansible_Outcome.csv"
+        state: absent 
+      delegate_to: <SERVER>.<DOMAIN>.net
+      vars:
+        ansible_ssh_user: "{{ awx_user | default() }}"
+        ansible_ssh_password: "{{ awx_password | default() }}"

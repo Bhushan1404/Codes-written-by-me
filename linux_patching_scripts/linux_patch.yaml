@@ -1,0 +1,275 @@
+---
+ - name: This Playbook will update the server with latest patches
+   hosts: all
+   gather_facts: false
+   become: true
+   become_method: dzdo
+   tasks:
+      - name: setup
+        setup:
+        register: setup
+
+      - name: Checking current kernel version of the host beafore patching
+        raw: uname -r
+        register: kernel_before_patch
+
+      - name: Check root filesystem space
+        raw: df / --output=pcent | tail -n 1
+        register: disk_usage
+        changed_when: false
+
+      - name: debug
+        debug:
+          var: disk_usage
+
+      - name: Fail if root filesystem is 100% full
+        fail:
+          msg: "Root filesystem is 100% full, patching cannot be performed."
+        when: disk_usage.stdout_lines == "100"
+
+      - name: Clean the repositories
+        raw: yum clean all
+        register: yum_clean
+
+      - name: Remove cache file
+        file:
+          path: /var/cache/yum
+          state: absent
+        #when: yum_clean is success
+        ignore_errors: true
+
+      - name: check if extra repo exist
+        shell: yum repolist all | grep -E 'repo-*-Extras'
+        register: extra_repo
+        ignore_errors: yes
+
+      - name: Disable extra repos
+        raw: yum config-manager --disable repo-*-Extras
+        when:
+          - ansible_distribution == 'RedHat'
+          - extra_repo.rc == 0
+
+      - name: Check for package updates
+        shell: yum repolist enabled | wc -l
+        register: repolist_result
+        changed_when: false
+        failed_when: false
+
+      - name: debug repo count
+        debug:
+            msg: "Repo available are: {{ repolist_result.stdout }}"
+
+      - name: Apply patches to RHEL server
+        ansible.builtin.yum:
+          name: "*"
+          state: latest
+          update_cache: yes
+        register: yum_result
+        when:
+          - ansible_distribution == "RedHat"
+          - repolist_result.stdout | int > 0
+        ignore_errors: true
+
+      - name: debug result
+        debug:
+          var: yum_result
+
+      - name: Checking the new updated kernel version on rhel server
+        raw: rpm -qa | grep kernel| sort| tail -1 | awk -F- '{print $(NF -1)"-"$NF}'
+        register: new_kernel
+        when: ansible_distribution == "RedHat"
+
+      - name: Wait for server to comeback online
+        block:
+          - name: Reboot rhel server if packages were updated
+            reboot:
+              reboot_timeout: 300
+            register: reboot_result
+            when:
+              - ansible_distribution == "RedHat"
+              - yum_result.changed
+
+          - name: Wait for server to comeback online
+            wait_for_connection:
+              delay: 0
+              timeout: 300
+              sleep: 0
+              connect_timeout: 5
+            register: waitresult
+            until: waitresult is success
+            retries: 5
+            delay: 6
+
+          - name: Verify system after successful reboot
+            raw: uptime
+            register: uptime_result
+        when: reboot_result is defined
+
+        rescue:
+          - name: debug
+            debug:
+              msg: "{{ inventory_hostname }} is not up after 5 retries, Kindly patch the server manually."
+            when: reboot_result is defined
+
+      - name: Check if the system has rebooted successfully
+        debug:
+          msg: "System successfully rebooted. Uptime: {{ uptime_result.stdout }}"
+        when: uptime_result.stdout is defined
+
+      - name: checking the updated kernel version on target hosts
+        raw: uname -r
+        register: new_kernel
+
+      - name: Display new kernel version of target host
+        debug:
+          msg: "Latest kernel of system {{ inventory_hostname }} is {{ new_kernel.stdout }}"
+
+      - name: Set server flag for creating report
+        set_fact:
+            create_report: "{{ (disk_usage.stdout_lines == '100') or ( repolist_result.stdout| int == 0) or (yum_result.changed and reboot_result is not defined) or (yum_result.changed and uptime_result is not defined) or (yum_result.get('failed', false)) or (yum_result.changed == false) }}"
+
+      - name: Remove if report file exists
+        file:
+          path: "/home/ptuser/Linux_patch_report/Linux_patching_{{ ansible_date_time.date }}.txt"
+          state: absent
+        ignore_errors: yes
+
+      - name: Create a file in reporting server to store patching report
+        file:
+          path: "Linux_patching_{{ ansible_date_time.date }}.txt"
+          state: touch
+          mode: "0755"
+        run_once: true
+        when: create_report
+        delegate_to: localhost
+        become_method: sudo
+
+      - name: Create a file in reporting server to store patching report
+        file:
+          path: "success_patch_log_{{ ansible_date_time.date }}.txt"
+          state: touch
+          mode: "0755"
+        run_once: true
+        delegate_to: localhost
+        become_method: sudo
+
+      - name: Log server status to report file if error occured
+        block:
+          - name:  Capture failure information
+            lineinfile:
+              path: "Linux_patching_{{ ansible_date_time.date }}.txt"
+              line: |
+
+                  Server: {{ inventory_hostname }}
+
+                  Reboot Status: {{ 'Yes' if reboot_result is defined else 'No' |default() }}
+
+                  Patch Status: {% if yum_result is defined and yum_result.changed %}Patch Applied Successfully{% elif yum_result is defined and yum_result.get('failed', false) %}YUM Failed: {{ yum_result.msg }}
+                  Stdout: {{ yum_result.module_stdout | default() }}
+                  StdErr: {{ yum_result.module_stderr |default() }}{%elif reboot_result.get('failed', false) %} Reboot Failed: {{ reboot_result.msg | default() }}{% elif repolist_result.stdout | int == 0 %}Error with repolist, No repositories available{% else %}Nothing to do{% endif %}
+
+
+                  Disk Usage: {{disk_usage.stdout | default() }}
+                  ------------------------------------------------
+            when: create_report
+            delegate_to: localhost
+            become_method: sudo 
+
+          - name: Debug Successful Patched servers
+            debug:
+              msg: "Server {{ inventory_hostname }} was Patched successfully without any issue"
+            when:
+              - yum_result.changed
+              - reboot_result is defined
+              - uptime_result.defined
+
+          - name: Log Success message for server
+            lineinfile:
+                path: "success_patch_log_{{ ansible_date_time.date }}.txt"
+                line: "Server {{ inventory_hostname }} was Patched successfully without any issue"
+                create: yes
+            delegate_to: localhost
+            become_method: yes
+            when:
+              - yum_result.changed
+              - reboot_result is defined
+              - uptime_result.defined
+
+ - name: Report file transfer to mysql host
+   hosts: localhost
+   gather_facts: true
+   vars_files:
+       - vars.yml
+   tasks:
+     - name: Check wheter failure file exists
+       shell: test -f "Linux_patching_{{ ansible_date_time.date }}.txt"
+       register: fail_file
+
+     - name: Copy the failure file
+       copy:
+         src: "{{ playbook_dir }}/Linux_patching_{{ ansible_date_time.date }}.txt"
+         dest: "/home/ptuser/Linux_patch_report"
+         remote_src: false
+       when: fail_file.rc == 0
+       delegate_to: <SERVER>
+       vars:
+         ansible_ssh_user: "{{ awx_user | default() }}"
+         ansible_ssh_password: "{{ awx_password | default() }}"
+
+     - name: Check wheter pass file exists
+       shell: test -f "success_patch_log_{{ ansible_date_time.date }}.txt"
+       register: pass_file
+
+     - name: Copy Success file
+       copy:
+         src: "{{ playbook_dir }}/success_patch_log_{{ ansible_date_time.date }}.txt"
+         dest: "/home/ptuser/Linux_patch_report"
+         remote_src: false
+       when: pass_file.rc == 0
+       delegate_to: <SERVER>
+       vars:
+         ansible_ssh_user: "{{ awx_user | default() }}"
+         ansible_ssh_password: "{{ awx_password| default() }}"
+
+     - name: Send Patched Summary email via mailx
+       shell: |
+              mailx -s "Details of Ansible Patching Activity hosted on {{ ansible_date_time.date }}" -a /home/ptuser/Linux_patch_report/Linux_patching_{{ ansible_date_time.date }}.txt bhushan_arun.mane_ext@<DOMAIN>.net <<EOF
+              Hi Reciever,
+
+              Greetings of the day....
+
+              PFB Patched successfull servers and attached failure servers with details in txt.
+
+              Passed Servers:
+
+              $(cat /home/ptuser/Linux_patch_report/success_patch_log_{{ ansible_date_time.date }}.txt 2>/dev/null || echo "No Passed Servers Found.")
+
+              Regards,
+              Automation Team
+              EOF
+       args:
+          executable: /bin/bash
+       run_once: true
+       delegate_to: <SERVER>
+       vars:
+         ansible_ssh_user: "{{ awx_user | default() }}"
+         ansible_ssh_password: "{{ awx_password| default() }}"
+
+     - name: Remove failure file from awx host
+       file:
+         path: "/home/ptuser/Linux_patch_report/Linux_patching_{{ ansible_date_time.date }}.txt"
+         state: absent
+       delegate_to: <SERVER>
+       vars:
+         ansible_ssh_user: "{{ awx_user | default() }}"
+         ansible_ssh_password: "{{ awx_password | default() }}"
+
+     - name: Remove pass file from awx host
+       file:
+         path: "/home/ptuser/Linux_patch_report/success_patch_log_{{ ansible_date_time.date }}.txt"
+         state: absent
+       delegate_to: <SERVER>
+       vars:
+         ansible_ssh_user: "{{ awx_user| default() }}"
+         ansible_ssh_password: "{{ awx_password| default() }}"
+
